@@ -26,7 +26,7 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', userSchema);
 
-// Схема Message
+// Схема Message (без sender, TTL 3 суток)
 const messageSchema = new mongoose.Schema({
   recipient: { type: String, required: true },
   message: {
@@ -34,7 +34,7 @@ const messageSchema = new mongoose.Schema({
     body: [Number],
     timestamp: Number
   },
-  createdAt: { type: Date, expires: '30d', default: Date.now }
+  createdAt: { type: Date, expires: '3d', default: Date.now } // TTL 3 суток
 });
 const Message = mongoose.model('Message', messageSchema);
 
@@ -46,7 +46,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', mongodb: mongoose.connection.readyState });
 });
 
-// Регистрация
+// Регистрация (без изменений)
 app.post('/register', async (req, res) => {
   const { username, publicBundle } = req.body;
   if (!username || !publicBundle) {
@@ -81,7 +81,7 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Получение публичного bundle
+// Получение публичного bundle (без изменений)
 app.get('/bundle/:username', async (req, res) => {
   const { username } = req.params;
   try {
@@ -96,7 +96,7 @@ app.get('/bundle/:username', async (req, res) => {
   }
 });
 
-// Отправка сообщения
+// Отправка сообщения (Sealed Sender: без sender)
 app.post('/send', async (req, res) => {
   const { recipient, message } = req.body;
   if (!recipient || !message) {
@@ -123,7 +123,7 @@ app.post('/send', async (req, res) => {
   }
 });
 
-// Получение сообщений
+// Получение сообщений (без изменений)
 app.get('/fetch/:username', async (req, res) => {
   const { username } = req.params;
   try {
@@ -141,7 +141,7 @@ app.get('/fetch/:username', async (req, res) => {
   }
 });
 
-// Подтверждение доставки
+// Подтверждение доставки (удаление сообщения)
 app.post('/ack', async (req, res) => {
   const { messageId } = req.body;
   if (!messageId) {
@@ -155,6 +155,21 @@ app.post('/ack', async (req, res) => {
     res.json({ status: 'ok', messageId });
   } catch (error) {
     console.error('Acknowledge message error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Новый эндпоинт для статуса сообщения (для уведомлений о недоставке)
+app.get('/status/:messageId', async (req, res) => {
+  const { messageId } = req.params;
+  try {
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.json({ status: 'not_found' }); // Недоставлено или удалено
+    }
+    res.json({ status: 'pending' }); // Ещё в очереди
+  } catch (error) {
+    console.error('Message status error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
