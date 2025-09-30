@@ -1,10 +1,18 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const cors = require('cors');
 const dotenv = require('dotenv');
 
 dotenv.config();
 
 const app = express();
+
+// CORS - разрешаем запросы от React/Electron
+app.use(cors({
+  origin: 'http://localhost:3000',
+  credentials: true
+}));
+
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
@@ -26,7 +34,7 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', userSchema);
 
-// Схема Message (без sender, TTL 3 суток)
+// Схема Message
 const messageSchema = new mongoose.Schema({
   recipient: { type: String, required: true },
   message: {
@@ -34,11 +42,12 @@ const messageSchema = new mongoose.Schema({
     body: [Number],
     timestamp: Number
   },
-  createdAt: { type: Date, expires: '3d', default: Date.now } // TTL 3 суток
+  createdAt: { type: Date, expires: '3d', default: Date.now }
 });
 const Message = mongoose.model('Message', messageSchema);
 
-mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+// Подключение MongoDB (убрал deprecated опции)
+mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB Atlas'))
   .catch(err => console.error('MongoDB connection error:', err));
 
@@ -46,7 +55,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', mongodb: mongoose.connection.readyState });
 });
 
-// Регистрация (без изменений)
 app.post('/register', async (req, res) => {
   const { username, publicBundle } = req.body;
   if (!username || !publicBundle) {
@@ -81,7 +89,6 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Получение публичного bundle (без изменений)
 app.get('/bundle/:username', async (req, res) => {
   const { username } = req.params;
   try {
@@ -96,7 +103,6 @@ app.get('/bundle/:username', async (req, res) => {
   }
 });
 
-// Отправка сообщения (Sealed Sender: без sender)
 app.post('/send', async (req, res) => {
   const { recipient, message } = req.body;
   if (!recipient || !message) {
@@ -123,7 +129,6 @@ app.post('/send', async (req, res) => {
   }
 });
 
-// Получение сообщений (без изменений)
 app.get('/fetch/:username', async (req, res) => {
   const { username } = req.params;
   try {
@@ -141,7 +146,6 @@ app.get('/fetch/:username', async (req, res) => {
   }
 });
 
-// Подтверждение доставки (удаление сообщения)
 app.post('/ack', async (req, res) => {
   const { messageId } = req.body;
   if (!messageId) {
@@ -159,15 +163,14 @@ app.post('/ack', async (req, res) => {
   }
 });
 
-// Новый эндпоинт для статуса сообщения (для уведомлений о недоставке)
 app.get('/status/:messageId', async (req, res) => {
   const { messageId } = req.params;
   try {
     const message = await Message.findById(messageId);
     if (!message) {
-      return res.json({ status: 'not_found' }); // Недоставлено или удалено
+      return res.json({ status: 'not_found' });
     }
-    res.json({ status: 'pending' }); // Ещё в очереди
+    res.json({ status: 'pending' });
   } catch (error) {
     console.error('Message status error:', error);
     res.status(500).json({ error: 'Internal server error' });
