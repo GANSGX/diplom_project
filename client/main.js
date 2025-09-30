@@ -1,5 +1,9 @@
-const { app, BrowserWindow } = require('electron');
-const path = require('path');
+import { app, BrowserWindow } from 'electron';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -8,17 +12,14 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      webSecurity: false  // Отключаем веб-безопасность для тестов
+      webSecurity: false
     }
   });
   
   win.loadURL('http://localhost:3000');
-  
-  // Открываем DevTools автоматически
   win.webContents.openDevTools();
   
-  // Включаем логи в консоль Electron
-  win.webContents.on('console-message', (event, level, message, line, sourceId) => {
+  win.webContents.on('console-message', (event, level, message) => {
     console.log(`[${level}] ${message}`);
   });
 }
