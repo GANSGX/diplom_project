@@ -7,7 +7,6 @@ dotenv.config();
 
 const app = express();
 
-// CORS - разрешаем запросы от React/Electron
 app.use(cors({
   origin: 'http://localhost:3000',
   credentials: true
@@ -34,19 +33,20 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', userSchema);
 
-// Схема Message
+// Схема Message - добавлены ephemeralKey и iv
 const messageSchema = new mongoose.Schema({
   recipient: { type: String, required: true },
   message: {
     type: { type: Number, required: true },
     body: [Number],
-    timestamp: Number
+    timestamp: Number,
+    ephemeralKey: [Number],
+    iv: [Number]
   },
   createdAt: { type: Date, expires: '3d', default: Date.now }
 });
 const Message = mongoose.model('Message', messageSchema);
 
-// Подключение MongoDB (убрал deprecated опции)
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB Atlas'))
   .catch(err => console.error('MongoDB connection error:', err));
@@ -118,7 +118,9 @@ app.post('/send', async (req, res) => {
       message: {
         type: message.type,
         body: message.body,
-        timestamp: message.timestamp
+        timestamp: message.timestamp,
+        ephemeralKey: message.ephemeralKey,
+        iv: message.iv
       }
     });
     await msg.save();
