@@ -1,4 +1,4 @@
-// crypto.js - Signal Protocol Implementation (CommonJS)
+// crypto.js - Signal Protocol Implementation (Universal ES6)
 /**
  * Signal Protocol crypto module
  * - Generate Signal identity and prekeys
@@ -7,7 +7,7 @@
  * - Export/import Signal identity keys with password protection
  */
 
-const {
+import {
   IdentityKeyPair,
   PreKeyBundle,
   PreKeyRecord,
@@ -15,8 +15,39 @@ const {
   SessionBuilder,
   SessionCipher,
   SignalProtocolAddress,
-  ProtocolStore
-} = require('@signalapp/libsignal-client');
+  ProtocolStore,
+  PreKeySignalMessage,
+  SignalMessage
+} from '@signalapp/libsignal-client';
+
+// Определяем окружение
+const isNode = typeof process !== 'undefined' && process.versions?.node;
+const isBrowser = typeof window !== 'undefined';
+
+// Универсальный crypto API
+const getCrypto = () => {
+  if (isBrowser) {
+    return window.crypto;
+  } else if (isNode) {
+    // В Node.js 15+ есть webcrypto
+    return globalThis.crypto || require('crypto').webcrypto;
+  }
+  throw new Error('Crypto API not available');
+};
+
+// Универсальная функция для работы с Buffer/Uint8Array
+const toBuffer = (data) => {
+  if (data instanceof Uint8Array) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return new Uint8Array(data);
+  }
+  if (typeof data === 'string') {
+    return new TextEncoder().encode(data);
+  }
+  return new Uint8Array(data);
+};
 
 // Simple in-memory store for Signal Protocol
 // В продакшене это должно быть в IndexedDB
@@ -119,18 +150,18 @@ async function generateSignalIdentity() {
       await signalStore.storePreKey(preKeyId, preKey);
       preKeys.push({
         keyId: preKeyId,
-        publicKey: preKey.publicKey().serialize()
+        publicKey: Array.from(preKey.publicKey().serialize())
       });
     }
 
     console.log('✅ Signal identity generated successfully');
     return {
-      identityKey: identityKeyPair.publicKey().serialize(),
+      identityKey: Array.from(identityKeyPair.publicKey().serialize()),
       registrationId: signalStore.registrationId,
       signedPreKey: {
         keyId: signedPreKeyId,
-        publicKey: signedPreKey.publicKey().serialize(),
-        signature: signedPreKey.signature()
+        publicKey: Array.from(signedPreKey.publicKey().serialize()),
+        signature: Array.from(signedPreKey.signature())
       },
       preKeys
     };
@@ -156,11 +187,11 @@ async function createSignalSession(username, bundle) {
       bundle.registrationId,
       1, // deviceId
       bundle.preKeys[0].keyId,
-      Buffer.from(bundle.preKeys[0].publicKey),
+      toBuffer(bundle.preKeys[0].publicKey),
       bundle.signedPreKey.keyId,
-      Buffer.from(bundle.signedPreKey.publicKey),
-      Buffer.from(bundle.signedPreKey.signature),
-      Buffer.from(bundle.identityKey)
+      toBuffer(bundle.signedPreKey.publicKey),
+      toBuffer(bundle.signedPreKey.signature),
+      toBuffer(bundle.identityKey)
     );
 
     // Строим сессию
@@ -187,7 +218,7 @@ async function encryptMessage(username, message) {
     const address = new SignalProtocolAddress(username, 1);
     const sessionCipher = new SessionCipher(signalStore, address);
     
-    const messageBuffer = Buffer.from(message, 'utf8');
+    const messageBuffer = toBuffer(message);
     const ciphertext = await sessionCipher.encrypt(messageBuffer);
 
     return {
@@ -215,16 +246,14 @@ async function decryptMessage(username, encryptedMessage) {
 
     let plaintext;
     if (encryptedMessage.type === 3) { // PreKeySignalMessage
-      const { PreKeySignalMessage } = require('@signalapp/libsignal-client');
-      const message = PreKeySignalMessage.deserialize(Buffer.from(encryptedMessage.body));
+      const message = PreKeySignalMessage.deserialize(toBuffer(encryptedMessage.body));
       plaintext = await sessionCipher.decryptPreKeySignalMessage(message);
     } else { // SignalMessage
-      const { SignalMessage } = require('@signalapp/libsignal-client');
-      const message = SignalMessage.deserialize(Buffer.from(encryptedMessage.body));
+      const message = SignalMessage.deserialize(toBuffer(encryptedMessage.body));
       plaintext = await sessionCipher.decryptSignalMessage(message);
     }
 
-    return Buffer.from(plaintext).toString('utf8');
+    return new TextDecoder().decode(plaintext);
   } catch (error) {
     console.error(`❌ Failed to decrypt message from ${username}:`, error);
     throw error;
@@ -240,6 +269,8 @@ async function exportSignalIdentity(password) {
       throw new Error('No Signal identity to export');
     }
 
+    const crypto = getCrypto();
+
     // Сериализуем данные для экспорта
     const exportData = {
       identityKey: Array.from(signalStore.identityKey.serialize()),
@@ -254,7 +285,7 @@ async function exportSignalIdentity(password) {
       }))
     };
 
-    // Шифруем через AES (как в оригинальном коде)
+    // Шифруем через AES
     const dataString = JSON.stringify(exportData);
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -310,6 +341,8 @@ async function importSignalIdentity(encryptedJson, password) {
       throw new Error('Invalid backup file format');
     }
 
+    const crypto = getCrypto();
+
     // Расшифровываем
     const passwordKey = await crypto.subtle.importKey(
       'raw',
@@ -342,18 +375,18 @@ async function importSignalIdentity(encryptedJson, password) {
 
     // Восстанавливаем Signal store
     signalStore = new SimpleSignalStore();
-    signalStore.identityKey = IdentityKeyPair.deserialize(Buffer.from(exportData.identityKey));
+    signalStore.identityKey = IdentityKeyPair.deserialize(toBuffer(exportData.identityKey));
     signalStore.registrationId = exportData.registrationId;
 
     // Восстанавливаем prekeys
     for (const preKey of exportData.preKeys) {
-      const record = PreKeyRecord.deserialize(Buffer.from(preKey.record));
+      const record = PreKeyRecord.deserialize(toBuffer(preKey.record));
       signalStore.preKeys.set(preKey.id, record);
     }
 
     // Восстанавливаем signed prekeys
     for (const signedPreKey of exportData.signedPreKeys) {
-      const record = SignedPreKeyRecord.deserialize(Buffer.from(signedPreKey.record));
+      const record = SignedPreKeyRecord.deserialize(toBuffer(signedPreKey.record));
       signalStore.signedPreKeys.set(signedPreKey.id, record);
     }
 
@@ -444,7 +477,7 @@ async function testSignalProtocol() {
   }
 }
 
-module.exports = { 
+export { 
   generateSignalIdentity,
   createSignalSession,
   encryptMessage,

@@ -1,4 +1,19 @@
-// storage.js - Paranoid Security Local Storage
+// storage.js - Paranoid Security Local Storage (Universal ES6)
+
+// Определяем окружение
+const isBrowser = typeof window !== 'undefined' && typeof indexedDB !== 'undefined';
+const isNode = typeof process !== 'undefined' && process.versions?.node;
+
+// Универсальный crypto API
+const getCrypto = () => {
+  if (isBrowser) {
+    return window.crypto;
+  } else if (isNode) {
+    return globalThis.crypto || require('crypto').webcrypto;
+  }
+  throw new Error('Crypto API not available');
+};
+
 class ParanoidStorage {
   constructor() {
     this.db = null;
@@ -8,6 +23,10 @@ class ParanoidStorage {
   }
 
   async init(masterPassword) {
+    if (!isBrowser) {
+      throw new Error('ParanoidStorage requires IndexedDB (browser environment)');
+    }
+
     await this._deriveMasterKey(masterPassword);
     
     return new Promise((resolve, reject) => {
@@ -44,9 +63,10 @@ class ParanoidStorage {
   }
 
   async _deriveMasterKey(password) {
+    const crypto = getCrypto();
     const salt = new TextEncoder().encode('SecureMessenger_Salt_v1');
     
-    const passwordKey = await window.crypto.subtle.importKey(
+    const passwordKey = await crypto.subtle.importKey(
       'raw',
       new TextEncoder().encode(password),
       { name: 'PBKDF2' },
@@ -54,7 +74,7 @@ class ParanoidStorage {
       ['deriveKey']
     );
 
-    this.masterKey = await window.crypto.subtle.deriveKey(
+    this.masterKey = await crypto.subtle.deriveKey(
       {
         name: 'PBKDF2',
         salt: salt,
@@ -71,10 +91,11 @@ class ParanoidStorage {
   async _encrypt(data) {
     if (!this.masterKey) throw new Error('Мастер-ключ не инициализирован');
     
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const crypto = getCrypto();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
     const jsonData = JSON.stringify(data);
     
-    const encrypted = await window.crypto.subtle.encrypt(
+    const encrypted = await crypto.subtle.encrypt(
       { name: 'AES-GCM', iv },
       this.masterKey,
       new TextEncoder().encode(jsonData)
@@ -90,7 +111,8 @@ class ParanoidStorage {
   async _decrypt(encryptedObj) {
     if (!this.masterKey) throw new Error('Мастер-ключ не инициализирован');
     
-    const decrypted = await window.crypto.subtle.decrypt(
+    const crypto = getCrypto();
+    const decrypted = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: new Uint8Array(encryptedObj.iv) },
       this.masterKey,
       new Uint8Array(encryptedObj.data)
@@ -262,4 +284,5 @@ class ParanoidStorage {
   }
 }
 
-module.exports = { ParanoidStorage };
+export { ParanoidStorage };
+export default ParanoidStorage;

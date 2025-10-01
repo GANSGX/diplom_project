@@ -1,5 +1,25 @@
-// auth-manager.js
-const { ParanoidStorage } = require('./storage.js');
+// auth-manager.js - Universal ES6
+import { ParanoidStorage } from './storage.js';
+import { 
+  generateSignalIdentity, 
+  exportSignalIdentity, 
+  importSignalIdentity,
+  getPublicBundle 
+} from './crypto.js';
+
+// Определяем окружение
+const isBrowser = typeof window !== 'undefined';
+const isNode = typeof process !== 'undefined' && process.versions?.node;
+
+// Универсальный crypto API
+const getCrypto = () => {
+  if (isBrowser) {
+    return window.crypto;
+  } else if (isNode) {
+    return globalThis.crypto || require('crypto').webcrypto;
+  }
+  throw new Error('Crypto API not available');
+};
 
 class AuthManager {
   constructor() {
@@ -8,24 +28,28 @@ class AuthManager {
     this.serverUrl = 'http://localhost:3001';
   }
 
+  /**
+   * Регистрация с сохранением ключа в файл
+   */
   async register(username, masterPassword) {
     try {
-      const signalIdentity = await this._generateSignalKeys();
+      // Генерируем Signal identity
+      const signalIdentity = await generateSignalIdentity();
       
-      this.storage = new ParanoidStorage();
-      await this.storage.init(masterPassword);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Инициализируем storage (только для браузера)
+      if (isBrowser) {
+        this.storage = new ParanoidStorage();
+        await this.storage.init(masterPassword);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const identityData = { username, signalIdentity };
+        await this.storage.storeUserIdentity(identityData);
+      }
       
-      const identityData = { username, signalIdentity };
-      await this.storage.storeUserIdentity(identityData);
+      // Получаем публичный bundle для сервера
+      const publicBundle = getPublicBundle();
       
-      const publicBundle = {
-        identityKey: signalIdentity.identityKey,
-        registrationId: signalIdentity.registrationId,
-        signedPreKey: signalIdentity.signedPreKey,
-        preKeys: signalIdentity.preKeys
-      };
-      
+      // Регистрируем на сервере
       const response = await fetch(`${this.serverUrl}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -38,30 +62,45 @@ class AuthManager {
         throw new Error(result.error || 'Registration failed');
       }
       
+      // Экспортируем ключ в зашифрованный файл
+      const encryptedKey = await exportSignalIdentity(masterPassword);
+      
       this.currentUser = username;
       console.log(`Пользователь ${username} зарегистрирован`);
       
-      return { success: true, username };
+      return { 
+        success: true, 
+        username,
+        encryptedKey // Возвращаем для сохранения в файл
+      };
     } catch (error) {
       console.error('Registration error:', error);
       throw error;
     }
   }
 
-  async login(username, masterPassword) {
+  /**
+   * Логин с загрузкой ключа из файла
+   */
+  async login(username, masterPassword, encryptedKeyContent) {
     try {
-      this.storage = new ParanoidStorage();
-      await this.storage.init(masterPassword);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Импортируем identity из файла
+      await importSignalIdentity(encryptedKeyContent, masterPassword);
       
-      const identityData = await this.storage.getUserIdentity();
-      
-      if (!identityData) {
-        throw new Error('Identity не найден');
-      }
-      
-      if (identityData.username !== username) {
-        throw new Error(`Неверный username`);
+      // Инициализируем storage (только для браузера)
+      if (isBrowser) {
+        this.storage = new ParanoidStorage();
+        await this.storage.init(masterPassword);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Проверяем identity в storage
+        const identityData = await this.storage.getUserIdentity();
+        
+        if (!identityData) {
+          console.warn('Identity не найден в storage, но ключ из файла загружен');
+        } else if (identityData.username !== username) {
+          throw new Error(`Неверный username`);
+        }
       }
       
       this.currentUser = username;
@@ -86,7 +125,10 @@ class AuthManager {
       }
       
       const publicBundle = await response.json();
-      await this.storage.storeContact(username, publicBundle);
+      
+      if (this.storage) {
+        await this.storage.storeContact(username, publicBundle);
+      }
       
       console.log(`Пользователь ${username} найден`);
       
@@ -203,13 +245,15 @@ class AuthManager {
   }
 
   async _encryptMessage(plaintext, recipientPublicBundle) {
-    const ephemeralKey = await window.crypto.subtle.generateKey(
+    const crypto = getCrypto();
+    
+    const ephemeralKey = await crypto.subtle.generateKey(
       { name: "ECDH", namedCurve: "P-256" },
       true,
       ["deriveKey"]
     );
 
-    const recipientKey = await window.crypto.subtle.importKey(
+    const recipientKey = await crypto.subtle.importKey(
       "raw",
       new Uint8Array(recipientPublicBundle.identityKey),
       { name: "ECDH", namedCurve: "P-256" },
@@ -217,7 +261,7 @@ class AuthManager {
       []
     );
 
-    const sharedSecret = await window.crypto.subtle.deriveKey(
+    const sharedSecret = await crypto.subtle.deriveKey(
       { name: "ECDH", public: recipientKey },
       ephemeralKey.privateKey,
       { name: "AES-GCM", length: 256 },
@@ -225,14 +269,14 @@ class AuthManager {
       ["encrypt"]
     );
 
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const encrypted = await window.crypto.subtle.encrypt(
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await crypto.subtle.encrypt(
       { name: "AES-GCM", iv },
       sharedSecret,
       new TextEncoder().encode(plaintext)
     );
 
-    const ephemeralPublic = await window.crypto.subtle.exportKey("raw", ephemeralKey.publicKey);
+    const ephemeralPublic = await crypto.subtle.exportKey("raw", ephemeralKey.publicKey);
 
     return {
       type: 1,
@@ -243,9 +287,10 @@ class AuthManager {
   }
 
   async _decryptMessage(encryptedMsg) {
+    const crypto = getCrypto();
     const identity = await this.storage.getUserIdentity();
     
-    const ourPrivateKey = await window.crypto.subtle.importKey(
+    const ourPrivateKey = await crypto.subtle.importKey(
       "pkcs8",
       new Uint8Array(identity.signalIdentity.privateKey),
       { name: "ECDH", namedCurve: "P-256" },
@@ -253,7 +298,7 @@ class AuthManager {
       ["deriveKey"]
     );
 
-    const senderEphemeral = await window.crypto.subtle.importKey(
+    const senderEphemeral = await crypto.subtle.importKey(
       "raw",
       new Uint8Array(encryptedMsg.ephemeralKey),
       { name: "ECDH", namedCurve: "P-256" },
@@ -261,7 +306,7 @@ class AuthManager {
       []
     );
 
-    const sharedSecret = await window.crypto.subtle.deriveKey(
+    const sharedSecret = await crypto.subtle.deriveKey(
       { name: "ECDH", public: senderEphemeral },
       ourPrivateKey,
       { name: "AES-GCM", length: 256 },
@@ -269,39 +314,13 @@ class AuthManager {
       ["decrypt"]
     );
 
-    const decrypted = await window.crypto.subtle.decrypt(
+    const decrypted = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: new Uint8Array(encryptedMsg.iv) },
       sharedSecret,
       new Uint8Array(encryptedMsg.body)
     );
 
     return new TextDecoder().decode(decrypted);
-  }
-
-  async _generateSignalKeys() {
-    const keyPair = await window.crypto.subtle.generateKey(
-      { name: "ECDH", namedCurve: "P-256" },
-      true,
-      ["deriveKey"]
-    );
-    
-    const publicKey = await window.crypto.subtle.exportKey("raw", keyPair.publicKey);
-    const privateKey = await window.crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
-    
-    return {
-      identityKey: Array.from(new Uint8Array(publicKey)),
-      registrationId: Math.floor(Math.random() * 16383) + 1,
-      signedPreKey: {
-        keyId: 1,
-        publicKey: Array.from(new Uint8Array(publicKey).slice(0, 33)),
-        signature: Array.from(new Uint8Array(64))
-      },
-      preKeys: [{
-        keyId: 2,
-        publicKey: Array.from(new Uint8Array(publicKey).slice(0, 33))
-      }],
-      privateKey: Array.from(new Uint8Array(privateKey))
-    };
   }
 
   logout() {
@@ -311,4 +330,5 @@ class AuthManager {
   }
 }
 
-module.exports = { AuthManager };
+export { AuthManager };
+export default AuthManager;

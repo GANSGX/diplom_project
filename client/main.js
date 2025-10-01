@@ -1,6 +1,7 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs/promises';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,7 +23,45 @@ function createWindow() {
   win.webContents.on('console-message', (event, level, message) => {
     console.log(`[${level}] ${message}`);
   });
+
+  return win;
 }
+
+// IPC Handlers для файловых операций
+
+// Диалог сохранения файла
+ipcMain.handle('save-dialog', async (event, options) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return await dialog.showSaveDialog(win, options);
+});
+
+// Диалог открытия файла
+ipcMain.handle('open-dialog', async (event, options) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return await dialog.showOpenDialog(win, options);
+});
+
+// Запись файла
+ipcMain.handle('write-file', async (event, filePath, data) => {
+  try {
+    await fs.writeFile(filePath, data, 'utf8');
+    return { success: true, filePath };
+  } catch (error) {
+    console.error('Write file error:', error);
+    throw error;
+  }
+});
+
+// Чтение файла
+ipcMain.handle('read-file', async (event, filePath) => {
+  try {
+    const data = await fs.readFile(filePath, 'utf8');
+    return data;
+  } catch (error) {
+    console.error('Read file error:', error);
+    throw error;
+  }
+});
 
 app.whenReady().then(createWindow);
 
