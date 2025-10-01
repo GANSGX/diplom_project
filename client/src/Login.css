@@ -6,7 +6,11 @@
   justify-content: center;
   align-items: center;
   overflow: hidden;
-  position: relative;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 .particles {
@@ -32,11 +36,49 @@
   100% { transform: translateY(-100vh) translateX(50px); opacity: 0; }
 }
 
-.container {
+.flip-container {
+  perspective: 1500px;
   position: relative;
   z-index: 10;
   width: 420px;
-  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flipper {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 100%;
+}
+
+.flip-container.flipped .flipper {
+  transform: rotateY(180deg);
+}
+
+.card-face {
+  backface-visibility: hidden;
+  width: 100%;
+}
+
+.card-front {
+  z-index: 2;
+  transform: rotateY(0deg);
+}
+
+.flip-container.flipped .card-front {
+  position: absolute;
+  visibility: hidden;
+}
+
+.card-back {
+  transform: rotateY(180deg);
+}
+
+.flip-container:not(.flipped) .card-back {
+  position: absolute;
+  visibility: hidden;
 }
 
 .auth-card {
@@ -45,21 +87,11 @@
   border: 1px solid rgba(88, 166, 255, 0.1);
   border-radius: 20px;
   padding: 40px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4),
-              0 0 80px rgba(88, 166, 255, 0.05);
-  animation: slideIn 0.6s ease-out;
+  padding-bottom: 30px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 80px rgba(88, 166, 255, 0.05);
   position: relative;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  display: flex;
+  flex-direction: column;
 }
 
 .lang-switcher {
@@ -73,6 +105,7 @@
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid rgba(88, 166, 255, 0.1);
+  z-index: 10;
 }
 
 .lang-btn {
@@ -143,17 +176,7 @@ h1 {
 
 .form-group {
   margin-bottom: 20px;
-  animation: fadeIn 0.6s ease-out backwards;
   position: relative;
-}
-
-.form-group:nth-child(1) { animation-delay: 0.1s; }
-.form-group:nth-child(2) { animation-delay: 0.2s; }
-.form-group:nth-child(3) { animation-delay: 0.3s; }
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateX(-20px); }
-  to { opacity: 1; transform: translateX(0); }
 }
 
 label {
@@ -178,12 +201,7 @@ label {
   bottom: -2px;
   border-radius: 10px;
   padding: 2px;
-  background: linear-gradient(90deg, 
-    #58a6ff 0%, 
-    #7c3aed 25%, 
-    rgba(88, 166, 255, 0.2) 50%, 
-    rgba(88, 166, 255, 0.2) 100%
-  );
+  background: linear-gradient(90deg, #58a6ff 0%, #7c3aed 25%, rgba(88, 166, 255, 0.2) 50%, rgba(88, 166, 255, 0.2) 100%);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -207,7 +225,7 @@ label {
 
 input {
   width: 100%;
-  padding: 14px 12px;  /* Было 14px 16px - уменьшил боковые отступы */
+  padding: 14px 12px;
   background: rgba(13, 17, 23, 0.6);
   border: 1px solid rgba(88, 166, 255, 0.2);
   border-radius: 10px;
@@ -216,7 +234,7 @@ input {
   outline: none;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
-  box-sizing: border-box;  /* Добавь эту строку */
+  box-sizing: border-box;
 }
 
 input::placeholder {
@@ -283,6 +301,7 @@ input:focus {
   text-decoration: none;
   font-weight: 500;
   transition: color 0.3s ease;
+  cursor: pointer;
 }
 
 .toggle-mode a:hover {
@@ -311,7 +330,7 @@ input:focus {
 }
 
 @media (max-width: 480px) {
-  .container {
+  .flip-container {
     width: 100%;
     padding: 15px;
   }

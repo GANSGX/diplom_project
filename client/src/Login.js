@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import './Login.css';  // CSS можно без .css, но если не работает - добавь
-
+import './Login.css';
 
 const Login = ({ onLoginSuccess }) => {
   const [isRegister, setIsRegister] = useState(false);
   const [currentLang, setCurrentLang] = useState('ru');
+  const [formData, setFormData] = useState({});
 
   const translations = {
     ru: {
@@ -52,6 +52,7 @@ const Login = ({ onLoginSuccess }) => {
   useEffect(() => {
     const container = document.getElementById('particles');
     if (container) {
+      container.innerHTML = '';
       for (let i = 0; i < 50; i++) {
         const particle = document.createElement('div');
         particle.className = 'particle';
@@ -64,101 +65,176 @@ const Login = ({ onLoginSuccess }) => {
   }, []);
 
   const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    
     const wrapper = e.target.closest('.input-wrapper');
-    if (e.target.value.length > 0) {
-      wrapper.classList.add('filled');
+    if (value.length > 0) {
+      wrapper?.classList.add('filled');
     } else {
-      wrapper.classList.remove('filled');
+      wrapper?.classList.remove('filled');
     }
   };
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    const username = e.target.elements['login-username'].value;
-    const password = e.target.elements['login-password'].value;
-    
-    console.log('Login:', { username, password });
+  const handleLogin = () => {
+    console.log('Login:', formData);
     // TODO: Подключить AuthManager
   };
 
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    const username = e.target.elements['register-username'].value;
-    const password = e.target.elements['register-password'].value;
-    const confirm = e.target.elements['register-password-confirm'].value;
-    
-    if (password !== confirm) {
+  const handleRegister = () => {
+    if (formData.registerPassword !== formData.registerPasswordConfirm) {
       alert(currentLang === 'ru' ? 'Пароли не совпадают!' : 'Passwords do not match!');
       return;
     }
-    
-    console.log('Register:', { username, password });
+    console.log('Register:', formData);
     // TODO: Подключить AuthManager
   };
 
   return (
     <div className="login-page">
-      <div className="particles" id="particles"></div>
-      
-      <div className="container">
-        <div className="auth-card">
-          <div className="lang-switcher">
-            <button 
-              className={`lang-btn ${currentLang === 'ru' ? 'active' : ''}`}
-              onClick={() => setCurrentLang('ru')}
-            >
-              RU
-            </button>
-            <button 
-              className={`lang-btn ${currentLang === 'en' ? 'active' : ''}`}
-              onClick={() => setCurrentLang('en')}
-            >
-              EN
-            </button>
-          </div>
+      <div id="particles" className="particles"></div>
 
-          <div className="logo">
-            <div className="logo-icon">
-              <svg viewBox="0 0 24 24">
-                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
-              </svg>
+      <div className={`flip-container ${isRegister ? 'flipped' : ''}`}>
+        <div className="flipper">
+          {/* Передняя сторона - Login */}
+          <div className="card-face card-front">
+            <div className="auth-card">
+              <div className="lang-switcher">
+                <button 
+                  className={`lang-btn ${currentLang === 'ru' ? 'active' : ''}`}
+                  onClick={() => setCurrentLang('ru')}
+                >
+                  RU
+                </button>
+                <button 
+                  className={`lang-btn ${currentLang === 'en' ? 'active' : ''}`}
+                  onClick={() => setCurrentLang('en')}
+                >
+                  EN
+                </button>
+              </div>
+
+              <div className="logo">
+                <div className="logo-icon">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+                  </svg>
+                </div>
+                <h1>CryptoX</h1>
+                <p className="subtitle">{t.subtitle}</p>
+              </div>
+
+              <div>
+                <div className="form-group">
+                  <label>{t.username}</label>
+                  <div className="input-wrapper">
+                    <input 
+                      type="text" 
+                      name="loginUsername"
+                      placeholder={t.usernamePlaceholder}
+                      onChange={handleInputChange}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>{t.masterPassword}</label>
+                  <div className="input-wrapper">
+                    <input 
+                      type="password" 
+                      name="loginPassword"
+                      placeholder={t.passwordPlaceholder}
+                      onChange={handleInputChange}
+                    />
+                  </div>
+                </div>
+
+                <button className="btn" onClick={handleLogin}>{t.signIn}</button>
+
+                <div className="toggle-mode">
+                  {t.noAccount} <a onClick={() => setIsRegister(true)}>{t.createOne}</a>
+                </div>
+              </div>
+
+              <div className="security-badge">
+                <svg viewBox="0 0 24 24">
+                  <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6z"/>
+                </svg>
+                <span>{t.zeroKnowledge}</span>
+              </div>
             </div>
-            <h1>CryptoX</h1>
-            <p className="subtitle">{t.subtitle}</p>
           </div>
 
-          {!isRegister ? (
-            <form onSubmit={handleLogin}>
-              <div className="form-group">
-                <label>{t.username}</label>
-                <div className="input-wrapper">
-                  <input 
-                    type="text" 
-                    name="login-username"
-                    placeholder={t.usernamePlaceholder}
-                    onChange={handleInputChange}
-                    required 
-                  />
-                </div>
+          {/* Задняя сторона - Register */}
+          <div className="card-face card-back">
+            <div className="auth-card">
+              <div className="lang-switcher">
+                <button 
+                  className={`lang-btn ${currentLang === 'ru' ? 'active' : ''}`}
+                  onClick={() => setCurrentLang('ru')}
+                >
+                  RU
+                </button>
+                <button 
+                  className={`lang-btn ${currentLang === 'en' ? 'active' : ''}`}
+                  onClick={() => setCurrentLang('en')}
+                >
+                  EN
+                </button>
               </div>
 
-              <div className="form-group">
-                <label>{t.masterPassword}</label>
-                <div className="input-wrapper">
-                  <input 
-                    type="password" 
-                    name="login-password"
-                    placeholder={t.passwordPlaceholder}
-                    onChange={handleInputChange}
-                    required 
-                  />
+              <div className="logo">
+                <div className="logo-icon">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+                  </svg>
                 </div>
+                <h1>CryptoX</h1>
+                <p className="subtitle">{t.subtitle}</p>
               </div>
 
-              <button type="submit" className="btn">{t.signIn}</button>
+              <div>
+                <div className="form-group">
+                  <label>{t.chooseUsername}</label>
+                  <div className="input-wrapper">
+                    <input 
+                      type="text" 
+                      name="registerUsername"
+                      placeholder={t.uniqueUsername}
+                      onChange={handleInputChange}
+                    />
+                  </div>
+                </div>
 
-              <div className="toggle-mode">
-                {t.noAccount} <a href="#" onClick={(e) => { e.preventDefault(); setIsRegister(true); }}>{t.createOne}</a>
+                <div className="form-group">
+                  <label>{t.masterPassword}</label>
+                  <div className="input-wrapper">
+                    <input 
+                      type="password" 
+                      name="registerPassword"
+                      placeholder={t.createPassword}
+                      onChange={handleInputChange}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>{t.confirmPassword}</label>
+                  <div className="input-wrapper">
+                    <input 
+                      type="password" 
+                      name="registerPasswordConfirm"
+                      placeholder={t.reenterPassword}
+                      onChange={handleInputChange}
+                    />
+                  </div>
+                </div>
+
+                <button className="btn" onClick={handleRegister}>{t.createAccount}</button>
+
+                <div className="toggle-mode">
+                  {t.haveAccount} <a onClick={() => setIsRegister(false)}>{t.signInLink}</a>
+                </div>
               </div>
 
               <div className="security-badge">
@@ -167,62 +243,8 @@ const Login = ({ onLoginSuccess }) => {
                 </svg>
                 <span>{t.zeroKnowledge}</span>
               </div>
-            </form>
-          ) : (
-            <form onSubmit={handleRegister}>
-              <div className="form-group">
-                <label>{t.chooseUsername}</label>
-                <div className="input-wrapper">
-                  <input 
-                    type="text" 
-                    name="register-username"
-                    placeholder={t.uniqueUsername}
-                    onChange={handleInputChange}
-                    required 
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>{t.masterPassword}</label>
-                <div className="input-wrapper">
-                  <input 
-                    type="password" 
-                    name="register-password"
-                    placeholder={t.createPassword}
-                    onChange={handleInputChange}
-                    required 
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>{t.confirmPassword}</label>
-                <div className="input-wrapper">
-                  <input 
-                    type="password" 
-                    name="register-password-confirm"
-                    placeholder={t.reenterPassword}
-                    onChange={handleInputChange}
-                    required 
-                  />
-                </div>
-              </div>
-
-              <button type="submit" className="btn">{t.createAccount}</button>
-
-              <div className="toggle-mode">
-                {t.haveAccount} <a href="#" onClick={(e) => { e.preventDefault(); setIsRegister(false); }}>{t.signInLink}</a>
-              </div>
-
-              <div className="security-badge">
-                <svg viewBox="0 0 24 24">
-                  <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6z"/>
-                </svg>
-                <span>{t.zeroKnowledge}</span>
-              </div>
-            </form>
-          )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
