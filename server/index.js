@@ -33,8 +33,9 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', userSchema);
 
-// Схема Message - добавлены ephemeralKey и iv
+// Схема Message
 const messageSchema = new mongoose.Schema({
+  sender: { type: String, required: true },
   recipient: { type: String, required: true },
   message: {
     type: { type: Number, required: true },
@@ -96,7 +97,22 @@ app.get('/bundle/:username', async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    res.json(user.publicBundle);
+    
+    const publicBundle = {
+      identityKey: Array.from(user.publicBundle.identityKey),
+      registrationId: user.publicBundle.registrationId,
+      signedPreKey: {
+        keyId: user.publicBundle.signedPreKey.keyId,
+        publicKey: Array.from(user.publicBundle.signedPreKey.publicKey),
+        signature: Array.from(user.publicBundle.signedPreKey.signature)
+      },
+      preKeys: user.publicBundle.preKeys.map(pk => ({
+        keyId: pk.keyId,
+        publicKey: Array.from(pk.publicKey)
+      }))
+    };
+    
+    res.json(publicBundle);
   } catch (error) {
     console.error('Bundle fetch error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -104,7 +120,7 @@ app.get('/bundle/:username', async (req, res) => {
 });
 
 app.post('/send', async (req, res) => {
-  const { recipient, message } = req.body;
+  const { sender, recipient, message } = req.body;
   if (!recipient || !message) {
     return res.status(400).json({ error: 'Missing recipient or message' });
   }
@@ -114,6 +130,7 @@ app.post('/send', async (req, res) => {
       return res.status(404).json({ error: 'Recipient not found' });
     }
     const msg = new Message({
+      sender: sender || 'unknown',
       recipient,
       message: {
         type: message.type,
@@ -131,15 +148,20 @@ app.post('/send', async (req, res) => {
   }
 });
 
+// ✅ ИСПРАВЛЕНО: возвращаем пустой массив вместо 404
 app.get('/fetch/:username', async (req, res) => {
   const { username } = req.params;
   try {
     const messages = await Message.find({ recipient: username });
+    
+    // Всегда возвращаем массив (пустой или с данными)
     if (!messages.length) {
-      return res.status(404).json({ error: 'No messages found' });
+      return res.json([]);
     }
+    
     res.json(messages.map(msg => ({
       messageId: msg._id,
+      sender: msg.sender,
       message: msg.message
     })));
   } catch (error) {

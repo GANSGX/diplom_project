@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import './Login.css';
-import { AuthManager } from './auth-manager.js';
 import fileHelper from './file-helper.js';
 
-const Login = ({ onLoginSuccess }) => {
+const Login = ({ onLoginSuccess, authManager }) => {
   const [isRegister, setIsRegister] = useState(false);
   const [currentLang, setCurrentLang] = useState('ru');
   const [formData, setFormData] = useState({});
@@ -12,8 +11,6 @@ const Login = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-
-  const authManager = new AuthManager();
 
   const translations = {
     ru: {
@@ -87,7 +84,6 @@ const Login = ({ onLoginSuccess }) => {
     }
   }, []);
 
-  // Очистка сообщений при переключении между логином и регистрацией
   useEffect(() => {
     setError('');
     setSuccess('');
@@ -177,7 +173,7 @@ const Login = ({ onLoginSuccess }) => {
       if (result.success && result.encryptedKey) {
         setSuccess(t.savingKey);
         
-        const savedPath = await fileHelper.saveIdentityFile(username, result.encryptedKey);
+        await fileHelper.saveIdentityFile(username, result.encryptedKey);
         
         setSuccess(currentLang === 'ru' 
           ? `Регистрация успешна! Ключ сохранён` 
@@ -201,7 +197,6 @@ const Login = ({ onLoginSuccess }) => {
 
       <div className={`flip-container ${isRegister ? 'flipped' : ''}`}>
         <div className="flipper">
-          {/* Передняя сторона - Login */}
           <div className="card-face card-front">
             <div className="auth-card">
               <div className="lang-switcher">
@@ -298,7 +293,6 @@ const Login = ({ onLoginSuccess }) => {
             </div>
           </div>
 
-          {/* Задняя сторона - Register */}
           <div className="card-face card-back">
             <div className="auth-card">
               <div className="lang-switcher">
