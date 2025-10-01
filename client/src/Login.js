@@ -1,10 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import './Login.css';
+import { AuthManager } from './auth-manager.js';
+import fileHelper from './file-helper.js';
 
 const Login = ({ onLoginSuccess }) => {
   const [isRegister, setIsRegister] = useState(false);
   const [currentLang, setCurrentLang] = useState('ru');
   const [formData, setFormData] = useState({});
+  const [keyFile, setKeyFile] = useState(null);
+  const [keyFileName, setKeyFileName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const authManager = new AuthManager();
 
   const translations = {
     ru: {
@@ -24,7 +33,14 @@ const Login = ({ onLoginSuccess }) => {
       createAccount: 'Создать аккаунт',
       haveAccount: 'Уже есть аккаунт?',
       signInLink: 'Войти',
-      zeroKnowledge: 'Шифрование без доступа третьих лиц'
+      zeroKnowledge: 'Шифрование без доступа третьих лиц',
+      selectKeyFile: 'Выбрать файл ключа',
+      keyFileSelected: 'Файл выбран',
+      noFileSelected: 'Файл не выбран',
+      registering: 'Регистрация...',
+      loggingIn: 'Вход...',
+      savingKey: 'Сохранение ключа...',
+      saveKeyInfo: 'После регистрации откроется окно для сохранения файла ключа'
     },
     en: {
       subtitle: 'End-to-end encrypted messaging',
@@ -43,7 +59,14 @@ const Login = ({ onLoginSuccess }) => {
       createAccount: 'Create Account',
       haveAccount: 'Already have an account?',
       signInLink: 'Sign in',
-      zeroKnowledge: 'Zero-knowledge encryption'
+      zeroKnowledge: 'Zero-knowledge encryption',
+      selectKeyFile: 'Select Key File',
+      keyFileSelected: 'File selected',
+      noFileSelected: 'No file selected',
+      registering: 'Registering...',
+      loggingIn: 'Logging in...',
+      savingKey: 'Saving key...',
+      saveKeyInfo: 'After registration, a dialog will open to save your key file'
     }
   };
 
@@ -64,6 +87,14 @@ const Login = ({ onLoginSuccess }) => {
     }
   }, []);
 
+  // Очистка сообщений при переключении между логином и регистрацией
+  useEffect(() => {
+    setError('');
+    setSuccess('');
+    setKeyFile(null);
+    setKeyFileName('');
+  }, [isRegister]);
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -76,18 +107,92 @@ const Login = ({ onLoginSuccess }) => {
     }
   };
 
-  const handleLogin = () => {
-    console.log('Login:', formData);
-    // TODO: Подключить AuthManager
+  const handleSelectKeyFile = async () => {
+    try {
+      setError('');
+      const fileContent = await fileHelper.loadIdentityFile();
+      setKeyFile(fileContent);
+      setKeyFileName('✓ ' + t.keyFileSelected);
+    } catch (err) {
+      if (err.message !== 'Выбор файла отменён' && err.message !== 'Cancelled') {
+        setError(err.message);
+      }
+    }
   };
 
-  const handleRegister = () => {
-    if (formData.registerPassword !== formData.registerPasswordConfirm) {
-      alert(currentLang === 'ru' ? 'Пароли не совпадают!' : 'Passwords do not match!');
-      return;
+  const handleLogin = async () => {
+    try {
+      setError('');
+      setSuccess('');
+      setLoading(true);
+
+      const username = formData.loginUsername;
+      const password = formData.loginPassword;
+
+      if (!username || !password) {
+        throw new Error(currentLang === 'ru' ? 'Заполните все поля' : 'Fill in all fields');
+      }
+
+      if (!keyFile) {
+        throw new Error(currentLang === 'ru' ? 'Выберите файл ключа' : 'Select key file');
+      }
+
+      const result = await authManager.login(username, password, keyFile);
+
+      if (result.success) {
+        setSuccess(currentLang === 'ru' ? `Добро пожаловать, ${username}!` : `Welcome, ${username}!`);
+        setTimeout(() => {
+          onLoginSuccess(username);
+        }, 1000);
+      }
+    } catch (err) {
+      setError(err.message || (currentLang === 'ru' ? 'Ошибка входа' : 'Login error'));
+    } finally {
+      setLoading(false);
     }
-    console.log('Register:', formData);
-    // TODO: Подключить AuthManager
+  };
+
+  const handleRegister = async () => {
+    try {
+      setError('');
+      setSuccess('');
+      setLoading(true);
+
+      const username = formData.registerUsername;
+      const password = formData.registerPassword;
+      const confirmPassword = formData.registerPasswordConfirm;
+
+      if (!username || !password || !confirmPassword) {
+        throw new Error(currentLang === 'ru' ? 'Заполните все поля' : 'Fill in all fields');
+      }
+
+      if (password !== confirmPassword) {
+        throw new Error(currentLang === 'ru' ? 'Пароли не совпадают!' : 'Passwords do not match!');
+      }
+
+      setSuccess(t.registering);
+
+      const result = await authManager.register(username, password);
+
+      if (result.success && result.encryptedKey) {
+        setSuccess(t.savingKey);
+        
+        const savedPath = await fileHelper.saveIdentityFile(username, result.encryptedKey);
+        
+        setSuccess(currentLang === 'ru' 
+          ? `Регистрация успешна! Ключ сохранён` 
+          : `Registration successful! Key saved`
+        );
+
+        setTimeout(() => {
+          onLoginSuccess(username);
+        }, 2000);
+      }
+    } catch (err) {
+      setError(err.message || (currentLang === 'ru' ? 'Ошибка регистрации' : 'Registration error'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -133,6 +238,7 @@ const Login = ({ onLoginSuccess }) => {
                       name="loginUsername"
                       placeholder={t.usernamePlaceholder}
                       onChange={handleInputChange}
+                      disabled={loading}
                     />
                   </div>
                 </div>
@@ -145,14 +251,41 @@ const Login = ({ onLoginSuccess }) => {
                       name="loginPassword"
                       placeholder={t.passwordPlaceholder}
                       onChange={handleInputChange}
+                      disabled={loading}
                     />
                   </div>
                 </div>
 
-                <button className="btn" onClick={handleLogin}>{t.signIn}</button>
+                <div className="form-group">
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={handleSelectKeyFile}
+                    disabled={loading}
+                    type="button"
+                  >
+                    <svg viewBox="0 0 24 24" style={{ width: '18px', height: '18px', marginRight: '8px', fill: 'currentColor' }}>
+                      <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                    </svg>
+                    {t.selectKeyFile}
+                  </button>
+                  {keyFileName && (
+                    <p className="file-status">{keyFileName}</p>
+                  )}
+                </div>
+
+                {error && <div className="error-message">{error}</div>}
+                {success && <div className="success-message">{success}</div>}
+
+                <button 
+                  className="btn" 
+                  onClick={handleLogin}
+                  disabled={loading}
+                >
+                  {loading ? t.loggingIn : t.signIn}
+                </button>
 
                 <div className="toggle-mode">
-                  {t.noAccount} <a onClick={() => setIsRegister(true)}>{t.createOne}</a>
+                  {t.noAccount} <a onClick={() => !loading && setIsRegister(true)}>{t.createOne}</a>
                 </div>
               </div>
 
@@ -202,6 +335,7 @@ const Login = ({ onLoginSuccess }) => {
                       name="registerUsername"
                       placeholder={t.uniqueUsername}
                       onChange={handleInputChange}
+                      disabled={loading}
                     />
                   </div>
                 </div>
@@ -214,6 +348,7 @@ const Login = ({ onLoginSuccess }) => {
                       name="registerPassword"
                       placeholder={t.createPassword}
                       onChange={handleInputChange}
+                      disabled={loading}
                     />
                   </div>
                 </div>
@@ -226,14 +361,31 @@ const Login = ({ onLoginSuccess }) => {
                       name="registerPasswordConfirm"
                       placeholder={t.reenterPassword}
                       onChange={handleInputChange}
+                      disabled={loading}
                     />
                   </div>
                 </div>
 
-                <button className="btn" onClick={handleRegister}>{t.createAccount}</button>
+                <div className="info-message">
+                  <svg viewBox="0 0 24 24" style={{ width: '18px', height: '18px', marginRight: '10px', fill: 'currentColor', flexShrink: 0 }}>
+                    <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+                  </svg>
+                  <span>{t.saveKeyInfo}</span>
+                </div>
+
+                {error && <div className="error-message">{error}</div>}
+                {success && <div className="success-message">{success}</div>}
+
+                <button 
+                  className="btn" 
+                  onClick={handleRegister}
+                  disabled={loading}
+                >
+                  {loading ? t.registering : t.createAccount}
+                </button>
 
                 <div className="toggle-mode">
-                  {t.haveAccount} <a onClick={() => setIsRegister(false)}>{t.signInLink}</a>
+                  {t.haveAccount} <a onClick={() => !loading && setIsRegister(false)}>{t.signInLink}</a>
                 </div>
               </div>
 

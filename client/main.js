@@ -6,29 +6,7 @@ import fs from 'fs/promises';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      webSecurity: false
-    }
-  });
-  
-  win.loadURL('http://localhost:3000');
-  win.webContents.openDevTools();
-  
-  win.webContents.on('console-message', (event, level, message) => {
-    console.log(`[${level}] ${message}`);
-  });
-
-  return win;
-}
-
-// IPC Handlers для файловых операций
-
+// ===== РЕГИСТРИРУЕМ IPC HANDLERS СРАЗУ =====
 // Диалог сохранения файла
 ipcMain.handle('save-dialog', async (event, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
@@ -62,6 +40,28 @@ ipcMain.handle('read-file', async (event, filePath) => {
     throw error;
   }
 });
+
+// ===== СОЗДАНИЕ ОКНА =====
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      webSecurity: false
+    }
+  });
+  
+  win.loadURL('http://localhost:3000');
+  win.webContents.openDevTools();
+  
+  win.webContents.on('console-message', (event, level, message) => {
+    console.log(`[${level}] ${message}`);
+  });
+
+  return win;
+}
 
 app.whenReady().then(createWindow);
 

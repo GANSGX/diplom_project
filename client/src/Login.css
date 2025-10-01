@@ -289,6 +289,86 @@ input:focus {
   transform: translateY(0);
 }
 
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-secondary {
+  background: rgba(88, 166, 255, 0.15);
+  border: 1px solid rgba(88, 166, 255, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0;
+}
+
+.btn-secondary:hover {
+  background: rgba(88, 166, 255, 0.25);
+  border-color: rgba(88, 166, 255, 0.5);
+}
+
+.file-status {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #58a6ff;
+  text-align: center;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.error-message {
+  background: rgba(255, 77, 77, 0.1);
+  border: 1px solid rgba(255, 77, 77, 0.3);
+  color: #ff6b6b;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  margin-bottom: 15px;
+  text-align: center;
+  animation: slideIn 0.3s ease;
+}
+
+.success-message {
+  background: rgba(77, 255, 136, 0.1);
+  border: 1px solid rgba(77, 255, 136, 0.3);
+  color: #51cf66;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  margin-bottom: 15px;
+  text-align: center;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.info-message {
+  display: flex;
+  align-items: flex-start;
+  background: rgba(88, 166, 255, 0.08);
+  border: 1px solid rgba(88, 166, 255, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 15px;
+  font-size: 13px;
+  color: #8db9e8;
+  line-height: 1.5;
+}
+
+.info-message svg {
+  margin-top: 1px;
+  color: #58a6ff;
+}
+
 .toggle-mode {
   text-align: center;
   margin-top: 20px;
