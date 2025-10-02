@@ -1,0 +1,164 @@
+.profile-edit-modal {
+  max-width: 600px;
+}
+
+.profile-edit-header {
+  padding: 25px 30px;
+  border-bottom: 1px solid rgba(88, 166, 255, 0.1);
+  position: relative;
+}
+
+.profile-edit-header h2 {
+  color: #f0f6fc;
+  font-size: 24px;
+  margin: 0;
+}
+
+.profile-edit-content {
+  padding: 30px;
+}
+
+.profile-edit-avatar-section {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.profile-avatar-upload {
+  display: inline-block;
+  cursor: pointer;
+  position: relative;
+}
+
+.profile-avatar-upload .profile-avatar-large {
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.avatar-upload-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.profile-avatar-upload:hover .avatar-upload-overlay {
+  opacity: 1;
+}
+
+.avatar-upload-overlay svg {
+  margin-bottom: 8px;
+}
+
+.avatar-upload-overlay p {
+  color: white;
+  font-size: 14px;
+  margin: 0;
+}
+
+.profile-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group label {
+  color: #8b949e;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-group input,
+.form-group textarea {
+  padding: 12px 15px;
+  background: rgba(13, 17, 23, 0.6);
+  border: 1px solid rgba(88, 166, 255, 0.2);
+  border-radius: 10px;
+  color: #f0f6fc;
+  font-size: 15px;
+  outline: none;
+  transition: all 0.3s ease;
+  font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  border-color: rgba(88, 166, 255, 0.6);
+  background: rgba(13, 17, 23, 0.8);
+  box-shadow: 0 0 15px rgba(88, 166, 255, 0.3);
+}
+
+.form-group input::placeholder,
+.form-group textarea::placeholder {
+  color: #6e7681;
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.input-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.profile-edit-footer {
+  padding: 20px 30px;
+  border-top: 1px solid rgba(88, 166, 255, 0.1);
+  display: flex;
+  gap: 15px;
+  justify-content: flex-end;
+}
+
+.btn-primary,
+.btn-secondary {
+  padding: 12px 30px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #58a6ff 0%, #7c3aed 100%);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(88, 166, 255, 0.4);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: rgba(88, 166, 255, 0.15);
+  border: 1px solid rgba(88, 166, 255, 0.3);
+  color: #58a6ff;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.25);
+}
