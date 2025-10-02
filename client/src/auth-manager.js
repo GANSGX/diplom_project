@@ -29,11 +29,14 @@ class AuthManager {
     this.storage = null;
     this.currentUser = null;
     this.serverUrl = 'http://localhost:3001';
+    this.currentIdentity = null; // ДОБАВЛЕНО: хранить текущий identity
   }
 
   async register(username, masterPassword) {
     try {
+      // Генерируем НОВЫЙ identity только при регистрации
       const signalIdentity = await generateSignalIdentity();
+      this.currentIdentity = signalIdentity; // Сохраняем в памяти
       
       if (isBrowser) {
         this.storage = new ParanoidStorage();
@@ -51,6 +54,7 @@ class AuthManager {
         preKeys: signalIdentity.preKeys
       };
       
+      // Отправляем на сервер только при регистрации
       const response = await fetch(`${this.serverUrl}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -63,6 +67,7 @@ class AuthManager {
         throw new Error(result.error || 'Registration failed');
       }
       
+      // Экспортируем для сохранения в файл
       const encryptedKey = await exportSignalIdentity(masterPassword);
       
       this.currentUser = username;
@@ -81,8 +86,13 @@ class AuthManager {
 
   async login(username, masterPassword, encryptedKeyContent) {
     try {
+      // ИМПОРТИРУЕМ существующий identity из файла
       const signalIdentity = await importSignalIdentity(encryptedKeyContent, masterPassword);
+      this.currentIdentity = signalIdentity; // Сохраняем в памяти
       
+      console.log('Loaded identity key (first 10):', signalIdentity.identityKey.slice(0, 10));
+      
+      // ПРОВЕРЯЕМ что пользователь существует на сервере
       const response = await fetch(`${this.serverUrl}/bundle/${username}`);
       
       if (!response.ok) {
@@ -90,6 +100,17 @@ class AuthManager {
           throw new Error('Пользователь не найден на сервере');
         }
         throw new Error('Ошибка связи с сервером');
+      }
+      
+      const serverBundle = await response.json();
+      console.log('Server identity key (first 10):', serverBundle.identityKey.slice(0, 10));
+      
+      // ПРОВЕРКА: ключи должны совпадать
+      const keysMatch = JSON.stringify(signalIdentity.identityKey) === JSON.stringify(serverBundle.identityKey);
+      console.log('Identity keys match:', keysMatch);
+      
+      if (!keysMatch) {
+        throw new Error('Ключи не совпадают! Вы используете неправильный файл ключа для этого аккаунта.');
       }
       
       console.log('Пользователь найден на сервере');
@@ -325,19 +346,28 @@ class AuthManager {
       console.log('Encrypted message ephemeral key length:', encryptedMsg.ephemeralKey.length);
       
       const crypto = getCrypto();
-      const identity = await this.storage.getUserIdentity();
       
-      if (!identity || !identity.signalIdentity) {
-        throw new Error('Identity not found in storage');
+      // ИСПОЛЬЗУЕМ currentIdentity вместо загрузки из storage
+      const identity = this.currentIdentity || await this.storage.getUserIdentity();
+      
+      if (!identity || !identity.identityKey) {
+        // Если currentIdentity нет, пробуем из storage
+        const storedIdentity = await this.storage.getUserIdentity();
+        if (!storedIdentity || !storedIdentity.signalIdentity) {
+          throw new Error('Identity not found');
+        }
+        this.currentIdentity = storedIdentity.signalIdentity;
       }
       
-      console.log('Our identity key (first 10):', identity.signalIdentity.identityKey.slice(0, 10));
-      console.log('Our private key (first 10):', identity.signalIdentity.privateKey.slice(0, 10));
-      console.log('Our private key length:', identity.signalIdentity.privateKey.length);
+      const signalIdentity = this.currentIdentity.privateKey ? this.currentIdentity : this.currentIdentity.signalIdentity;
+      
+      console.log('Our identity key (first 10):', signalIdentity.identityKey.slice(0, 10));
+      console.log('Our private key (first 10):', signalIdentity.privateKey.slice(0, 10));
+      console.log('Our private key length:', signalIdentity.privateKey.length);
       
       const ourPrivateKey = await crypto.subtle.importKey(
         "pkcs8",
-        new Uint8Array(identity.signalIdentity.privateKey),
+        new Uint8Array(signalIdentity.privateKey),
         { name: "ECDH", namedCurve: "P-256" },
         false,
         ["deriveKey", "deriveBits"]
@@ -383,6 +413,7 @@ class AuthManager {
   logout() {
     if (this.storage) this.storage.destroy();
     this.currentUser = null;
+    this.currentIdentity = null; // Очищаем identity
     console.log('Вышли');
   }
 }
