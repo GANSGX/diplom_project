@@ -13,6 +13,35 @@ const Chat = ({ username, onLogout, authManager }) => {
   const messagesEndRef = useRef(null);
   const searchTimeoutRef = useRef(null);
 
+  // ✅ НОВОЕ: Загрузка контактов из IndexedDB при монтировании
+  useEffect(() => {
+    const loadContactsFromStorage = async () => {
+      if (!authManager.storage) return;
+      
+      try {
+        const storedContacts = await authManager.storage.getAllContacts();
+        
+        const formattedContacts = storedContacts.map((contact, index) => ({
+          id: Date.now() + index,
+          username: contact.username,
+          lastMessage: 'Сохраненный контакт',
+          timestamp: new Date(contact.addedAt).toLocaleTimeString([], { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+          }),
+          unread: 0
+        }));
+        
+        setContacts(formattedContacts);
+        console.log(`Загружено ${formattedContacts.length} контактов из хранилища`);
+      } catch (error) {
+        console.error('Failed to load contacts:', error);
+      }
+    };
+    
+    loadContactsFromStorage();
+  }, [authManager.storage]);
+
   // Polling для получения новых сообщений каждые 3 секунды
   useEffect(() => {
     const pollMessages = async () => {
@@ -52,7 +81,10 @@ const Chat = ({ username, onLogout, authManager }) => {
                   id: Date.now() + Math.random(),
                   username: sender,
                   lastMessage: messagesByContact[sender][0].text,
-                  timestamp: new Date(messagesByContact[sender][0].timestamp).toLocaleTimeString(),
+                  timestamp: new Date(messagesByContact[sender][0].timestamp).toLocaleTimeString([], { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  }),
                   unread: 1
                 });
               }
@@ -112,17 +144,31 @@ const Chat = ({ username, onLogout, authManager }) => {
     };
   }, [searchQuery]);
 
+  // ✅ ИСПРАВЛЕНО: правильная обработка текста из истории
   const loadChatHistory = async (contactUsername) => {
     try {
       if (!authManager.storage) return;
       
       const history = await authManager.storage.getChatHistory(contactUsername);
       
-      const formattedMessages = history.map(msg => ({
-        text: msg.message.body ? new TextDecoder().decode(new Uint8Array(msg.message.body)) : msg.message,
-        timestamp: msg.timestamp,
-        isOutgoing: msg.isOutgoing
-      }));
+      const formattedMessages = history.map(msg => {
+        let text = msg.message.body || msg.message;
+        
+        // Если это объект/массив (сырые байты) - декодируем
+        if (typeof text === 'object' && text !== null && !Array.isArray(text)) {
+          text = JSON.stringify(text);
+        } else if (Array.isArray(text)) {
+          text = new TextDecoder().decode(new Uint8Array(text));
+        } else if (typeof text !== 'string') {
+          text = String(text);
+        }
+        
+        return {
+          text: text,
+          timestamp: msg.timestamp,
+          isOutgoing: msg.isOutgoing
+        };
+      });
       
       setMessages(prev => ({
         ...prev,
@@ -189,7 +235,7 @@ const Chat = ({ username, onLogout, authManager }) => {
       console.log('Message sent successfully');
     } catch (error) {
       console.error('Failed to send message:', error);
-      alert('Не удалось отправить сообщение');
+      alert('Не удалось отправить сообщение: ' + error.message);
     } finally {
       setLoading(false);
     }

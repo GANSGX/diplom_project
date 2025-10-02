@@ -81,24 +81,31 @@ class AuthManager {
 
   async login(username, masterPassword, encryptedKeyContent) {
     try {
-      await importSignalIdentity(encryptedKeyContent, masterPassword);
+      const signalIdentity = await importSignalIdentity(encryptedKeyContent, masterPassword);
+      
+      const response = await fetch(`${this.serverUrl}/bundle/${username}`);
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('Пользователь не найден на сервере');
+        }
+        throw new Error('Ошибка связи с сервером');
+      }
+      
+      console.log('Пользователь найден на сервере');
       
       if (isBrowser) {
         this.storage = new ParanoidStorage();
         await this.storage.init(masterPassword);
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        const identityData = await this.storage.getUserIdentity();
-        
-        if (!identityData) {
-          console.warn('Identity не найден в storage, но ключ из файла загружен');
-        } else if (identityData.username !== username) {
-          throw new Error(`Неверный username`);
-        }
+        const identityToStore = { username, signalIdentity };
+        await this.storage.storeUserIdentity(identityToStore);
+        console.log('Identity сохранен в IndexedDB');
       }
       
       this.currentUser = username;
-      console.log(`Пользователь ${username} вошел`);
+      console.log(`Пользователь ${username} успешно вошел`);
       
       return { success: true, username };
     } catch (error) {
@@ -149,7 +156,14 @@ class AuthManager {
         contact = { publicKey: searchResult.publicBundle };
       }
 
-      const encrypted = await this._encryptMessage(plaintext, contact.publicKey);
+      let recipientBundle = contact.publicKey;
+      
+      if (!recipientBundle || !recipientBundle.identityKey || recipientBundle.identityKey.length === 0) {
+        console.error('Invalid recipient bundle:', recipientBundle);
+        throw new Error('У получателя отсутствует валидный публичный ключ');
+      }
+
+      const encrypted = await this._encryptMessage(plaintext, recipientBundle);
 
       const response = await fetch(`${this.serverUrl}/send`, {
         method: 'POST',
@@ -178,7 +192,6 @@ class AuthManager {
     }
   }
 
-  // ✅ ИСПРАВЛЕНО: убрана проверка на 404, ожидаем массив всегда
   async fetchMessages() {
     try {
       if (!this.currentUser || !this.storage) {
@@ -194,7 +207,6 @@ class AuthManager {
 
       const messages = await response.json();
       
-      // Если пустой массив - сразу возвращаем
       if (!messages.length) {
         return [];
       }
@@ -233,15 +245,27 @@ class AuthManager {
   }
 
   async _ackMessage(messageId) {
-    await fetch(`${this.serverUrl}/ack`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messageId })
-    });
+    try {
+      await fetch(`${this.serverUrl}/ack`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId })
+      });
+    } catch (error) {
+      // Игнорируем ошибки ack
+    }
   }
 
   async _encryptMessage(plaintext, recipientPublicBundle) {
     try {
+      if (!recipientPublicBundle.identityKey || recipientPublicBundle.identityKey.length === 0) {
+        throw new Error('Recipient has invalid or empty identity key');
+      }
+      
+      console.log('=== ENCRYPT START ===');
+      console.log('Recipient identity key (first 10):', recipientPublicBundle.identityKey.slice(0, 10));
+      console.log('Recipient identity key length:', recipientPublicBundle.identityKey.length);
+      
       const crypto = getCrypto();
       
       const ephemeralKeyPair = await crypto.subtle.generateKey(
@@ -249,6 +273,10 @@ class AuthManager {
         true,
         ["deriveKey", "deriveBits"]
       );
+
+      const ephemeralPublicRaw = await crypto.subtle.exportKey("raw", ephemeralKeyPair.publicKey);
+      console.log('Ephemeral public key (first 10):', Array.from(new Uint8Array(ephemeralPublicRaw)).slice(0, 10));
+      console.log('Ephemeral public key length:', ephemeralPublicRaw.byteLength);
 
       const recipientPublicKey = await crypto.subtle.importKey(
         "raw",
@@ -275,6 +303,8 @@ class AuthManager {
 
       const ephemeralPublic = await crypto.subtle.exportKey("raw", ephemeralKeyPair.publicKey);
 
+      console.log('=== ENCRYPT END ===');
+
       return {
         type: 1,
         body: Array.from(new Uint8Array(encrypted)),
@@ -290,8 +320,20 @@ class AuthManager {
 
   async _decryptMessage(encryptedMsg) {
     try {
+      console.log('=== DECRYPT START ===');
+      console.log('Encrypted message ephemeral key (first 10):', encryptedMsg.ephemeralKey.slice(0, 10));
+      console.log('Encrypted message ephemeral key length:', encryptedMsg.ephemeralKey.length);
+      
       const crypto = getCrypto();
       const identity = await this.storage.getUserIdentity();
+      
+      if (!identity || !identity.signalIdentity) {
+        throw new Error('Identity not found in storage');
+      }
+      
+      console.log('Our identity key (first 10):', identity.signalIdentity.identityKey.slice(0, 10));
+      console.log('Our private key (first 10):', identity.signalIdentity.privateKey.slice(0, 10));
+      console.log('Our private key length:', identity.signalIdentity.privateKey.length);
       
       const ourPrivateKey = await crypto.subtle.importKey(
         "pkcs8",
@@ -301,6 +343,8 @@ class AuthManager {
         ["deriveKey", "deriveBits"]
       );
 
+      console.log('Our private key imported successfully');
+
       const senderEphemeralPublic = await crypto.subtle.importKey(
         "raw",
         new Uint8Array(encryptedMsg.ephemeralKey),
@@ -308,6 +352,8 @@ class AuthManager {
         false,
         []
       );
+
+      console.log('Sender ephemeral public key imported successfully');
 
       const sharedSecret = await crypto.subtle.deriveKey(
         { name: "ECDH", public: senderEphemeralPublic },
@@ -317,11 +363,15 @@ class AuthManager {
         ["decrypt"]
       );
 
+      console.log('Shared secret derived');
+
       const decrypted = await crypto.subtle.decrypt(
         { name: "AES-GCM", iv: new Uint8Array(encryptedMsg.iv) },
         sharedSecret,
         new Uint8Array(encryptedMsg.body)
       );
+
+      console.log('=== DECRYPT END ===');
 
       return new TextDecoder().decode(decrypted);
     } catch (error) {

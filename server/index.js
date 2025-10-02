@@ -148,13 +148,11 @@ app.post('/send', async (req, res) => {
   }
 });
 
-// ✅ ИСПРАВЛЕНО: возвращаем пустой массив вместо 404
 app.get('/fetch/:username', async (req, res) => {
   const { username } = req.params;
   try {
     const messages = await Message.find({ recipient: username });
     
-    // Всегда возвращаем массив (пустой или с данными)
     if (!messages.length) {
       return res.json([]);
     }
@@ -170,6 +168,7 @@ app.get('/fetch/:username', async (req, res) => {
   }
 });
 
+// ✅ ИСПРАВЛЕНО: возвращаем 200 даже если сообщение уже удалено
 app.post('/ack', async (req, res) => {
   const { messageId } = req.body;
   if (!messageId) {
@@ -178,7 +177,7 @@ app.post('/ack', async (req, res) => {
   try {
     const message = await Message.findByIdAndDelete(messageId);
     if (!message) {
-      return res.status(404).json({ error: 'Message not found' });
+      return res.json({ status: 'ok', messageId, note: 'already deleted' });
     }
     res.json({ status: 'ok', messageId });
   } catch (error) {
