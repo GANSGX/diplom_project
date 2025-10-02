@@ -30,6 +30,9 @@ const toBuffer = (data) => {
   return new Uint8Array(data);
 };
 
+// Глобальная переменная для хранения текущего identity
+let currentIdentity = null;
+
 /**
  * Генерация ключей ECDH
  */
@@ -63,6 +66,9 @@ async function generateSignalIdentity() {
       }]
     };
 
+    // Сохраняем сгенерированный identity
+    currentIdentity = identity;
+
     console.log('✅ Identity generated successfully');
     return identity;
   } catch (error) {
@@ -76,7 +82,12 @@ async function generateSignalIdentity() {
  */
 async function exportSignalIdentity(password) {
   try {
-    const identity = await generateSignalIdentity();
+    // ИСПОЛЬЗУЕМ УЖЕ СГЕНЕРИРОВАННЫЙ identity вместо создания нового
+    if (!currentIdentity) {
+      throw new Error('No identity to export. Call generateSignalIdentity() first.');
+    }
+    
+    const identity = currentIdentity;
     
     const crypto = getCrypto();
     const dataString = JSON.stringify(identity);
@@ -164,6 +175,9 @@ async function importSignalIdentity(encryptedJson, password) {
     );
 
     const identity = JSON.parse(new TextDecoder().decode(decrypted));
+
+    // Восстанавливаем currentIdentity
+    currentIdentity = identity;
 
     console.log('✅ Identity imported successfully');
     return identity;

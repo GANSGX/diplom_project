@@ -24,7 +24,7 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/chat_a
 
 // ===== WEBSOCKET =====
 
-const clients = new Map(); // username -> ws connection
+const clients = new Map();
 
 wss.on('connection', (ws) => {
   let username = null;
@@ -57,7 +57,7 @@ wss.on('connection', (ws) => {
 
 function broadcastToUser(username, event) {
   const client = clients.get(username);
-  if (client && client.readyState === 1) { // 1 = OPEN
+  if (client && client.readyState === 1) {
     client.send(JSON.stringify(event));
   }
 }
@@ -111,6 +111,14 @@ const profileSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now }
 });
 const Profile = mongoose.model('Profile', profileSchema);
+
+const blockSchema = new mongoose.Schema({
+  blocker: { type: String, required: true },
+  blocked: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+blockSchema.index({ blocker: 1, blocked: 1 }, { unique: true });
+const Block = mongoose.model('Block', blockSchema);
 
 // ===== ПОДКЛЮЧЕНИЕ К MONGODB =====
 
@@ -202,6 +210,19 @@ app.post('/send', async (req, res) => {
     if (!recipientUser) {
       return res.status(404).json({ error: 'Recipient not found' });
     }
+    
+    // Проверка блокировки
+    const blocked = await Block.findOne({
+      $or: [
+        { blocker: recipient, blocked: sender },
+        { blocker: sender, blocked: recipient }
+      ]
+    });
+    
+    if (blocked) {
+      return res.status(403).json({ error: 'Cannot send message - user blocked' });
+    }
+    
     const msg = new Message({
       sender: sender || 'unknown',
       recipient,
@@ -216,7 +237,6 @@ app.post('/send', async (req, res) => {
     await msg.save();
     console.log(`✅ Message sent from ${sender} to ${recipient}`);
     
-    // Отправить WebSocket уведомление получателю
     broadcastToUser(recipient, {
       type: 'new_message',
       from: sender
@@ -323,12 +343,11 @@ app.put('/profile/:username', async (req, res) => {
     );
     console.log(`✅ Profile updated: ${username}`);
     
-    // Отправить WebSocket уведомление всем онлайн-юзерам
     broadcastToAll({
       type: 'profile_updated',
       username: username,
       avatar: avatar
-    }, username); // Исключаем самого себя
+    }, username);
     
     res.json({ status: 'ok', profile });
   } catch (error) {
@@ -377,6 +396,97 @@ app.post('/profiles/batch', async (req, res) => {
     res.json(profileMap);
   } catch (error) {
     console.error('Batch profiles fetch error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ===== БЛОКИРОВКА =====
+
+app.post('/block', async (req, res) => {
+  const { blocker, blocked } = req.body;
+  if (!blocker || !blocked) {
+    return res.status(400).json({ error: 'Missing blocker or blocked' });
+  }
+  try {
+    await Block.create({ blocker, blocked });
+    console.log(`✅ ${blocker} blocked ${blocked}`);
+    
+    broadcastToUser(blocked, {
+      type: 'blocked',
+      by: blocker
+    });
+    
+    res.json({ status: 'ok' });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.json({ status: 'ok', note: 'already blocked' });
+    }
+    console.error('Block error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/unblock', async (req, res) => {
+  const { blocker, blocked } = req.body;
+  if (!blocker || !blocked) {
+    return res.status(400).json({ error: 'Missing blocker or blocked' });
+  }
+  try {
+    await Block.deleteOne({ blocker, blocked });
+    console.log(`✅ ${blocker} unblocked ${blocked}`);
+    
+    broadcastToUser(blocked, {
+      type: 'unblocked',
+      by: blocker
+    });
+    
+    res.json({ status: 'ok' });
+  } catch (error) {
+    console.error('Unblock error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/block-status/:user1/:user2', async (req, res) => {
+  const { user1, user2 } = req.params;
+  try {
+    const blocked = await Block.findOne({
+      $or: [
+        { blocker: user1, blocked: user2 },
+        { blocker: user2, blocked: user1 }
+      ]
+    });
+    
+    if (!blocked) {
+      return res.json({ blocked: false });
+    }
+    
+    res.json({
+      blocked: true,
+      blocker: blocked.blocker,
+      blocked: blocked.blocked
+    });
+  } catch (error) {
+    console.error('Block status error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ===== УДАЛЕНИЕ ЧАТОВ =====
+
+app.delete('/chat/:username/:contact', async (req, res) => {
+  const { username, contact } = req.params;
+  try {
+    const result = await Message.deleteMany({
+      $or: [
+        { sender: username, recipient: contact },
+        { sender: contact, recipient: username }
+      ]
+    });
+    console.log(`✅ Deleted ${result.deletedCount} messages for ${username} with ${contact}`);
+    res.json({ status: 'ok', deleted: result.deletedCount });
+  } catch (error) {
+    console.error('Delete chat error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

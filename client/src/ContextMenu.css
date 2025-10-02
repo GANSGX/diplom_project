@@ -1,0 +1,73 @@
+.context-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 2000;
+  background: transparent;
+}
+
+.context-menu {
+  position: fixed;
+  background: rgba(22, 27, 34, 0.98);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(88, 166, 255, 0.2);
+  border-radius: 12px;
+  padding: 8px 0;
+  min-width: 200px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  z-index: 2001;
+  animation: contextMenuAppear 0.15s ease;
+}
+
+@keyframes contextMenuAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  color: #c9d1d9;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+
+.context-menu-item:hover {
+  background: rgba(88, 166, 255, 0.15);
+  color: #f0f6fc;
+}
+
+.context-menu-item svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.context-menu-item-danger {
+  color: #ff6b6b;
+}
+
+.context-menu-item-danger:hover {
+  background: rgba(255, 107, 107, 0.15);
+  color: #ff4d4d;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: rgba(88, 166, 255, 0.1);
+  margin: 8px 0;
+}

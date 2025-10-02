@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './ProfileView.css';
 
-const ProfileView = ({ username, onClose, authManager }) => {
+const ProfileView = ({ username, currentUser, onClose, onBlock, onUnblock, isBlocked, authManager }) => {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -15,139 +15,104 @@ const ProfileView = ({ username, onClose, authManager }) => {
       if (response.ok) {
         const data = await response.json();
         setProfile(data);
-      } else {
-        setProfile({
-          username,
-          displayName: '',
-          avatar: '',
-          status: '',
-          bio: '',
-          birthdate: ''
-        });
       }
     } catch (error) {
       console.error('Failed to load profile:', error);
-      setProfile({
-        username,
-        displayName: '',
-        avatar: '',
-        status: '',
-        bio: '',
-        birthdate: ''
-      });
     } finally {
       setLoading(false);
     }
   };
 
-  const calculateAge = (birthdate) => {
-    if (!birthdate) return null;
-    const birth = new Date(birthdate);
-    const today = new Date();
-    let age = today.getFullYear() - birth.getFullYear();
-    const monthDiff = today.getMonth() - birth.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-      age--;
+  const handleBlockToggle = () => {
+    if (isBlocked) {
+      onUnblock(username);
+    } else {
+      onBlock(username);
     }
-    return age;
   };
 
   if (loading) {
     return (
-      <div className="profile-overlay" onClick={onClose}>
-        <div className="profile-modal" onClick={e => e.stopPropagation()}>
+      <div className="profile-view-overlay" onClick={onClose}>
+        <div className="profile-view-modal" onClick={(e) => e.stopPropagation()}>
           <div className="profile-loading">Загрузка...</div>
         </div>
       </div>
     );
   }
 
-  const age = profile?.birthdate ? calculateAge(profile.birthdate) : null;
+  const Avatar = () => {
+    if (profile?.avatar) {
+      return (
+        <img 
+          src={profile.avatar} 
+          alt={username}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      );
+    }
+    return <span style={{ fontSize: '60px', fontWeight: 600 }}>{username[0].toUpperCase()}</span>;
+  };
 
   return (
-    <div className="profile-overlay" onClick={onClose}>
-      <div className="profile-modal profile-view-modal" onClick={e => e.stopPropagation()}>
-        <button className="profile-close" onClick={onClose}>
+    <div className="profile-view-overlay" onClick={onClose}>
+      <div className="profile-view-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="profile-close-btn" onClick={onClose}>
           <svg viewBox="0 0 24 24" width="24" height="24">
             <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
           </svg>
         </button>
 
-        <div className="profile-header">
+        <div className="profile-view-content">
           <div className="profile-avatar-large">
-            {profile?.avatar ? (
-              <img src={profile.avatar} alt="Avatar" />
-            ) : (
-              <span>{(profile?.displayName || username)[0].toUpperCase()}</span>
-            )}
+            <Avatar />
           </div>
-          <h2 className="profile-name">{profile?.displayName || username}</h2>
-          <p className="profile-username">@{username}</p>
+
+          <h2 className="profile-username">{profile?.displayName || username}</h2>
+          <p className="profile-handle">@{username}</p>
+
           {profile?.status && (
-            <p className="profile-status">{profile.status}</p>
-          )}
-        </div>
-
-        <div className="profile-content">
-          {profile?.bio && (
-            <div className="profile-section">
-              <div className="profile-section-header">
-                <svg viewBox="0 0 24 24" width="20" height="20">
-                  <path fill="currentColor" d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
-                </svg>
-                <span>О себе</span>
-              </div>
-              <p className="profile-bio">{profile.bio}</p>
-            </div>
-          )}
-
-          <div className="profile-section">
-            <div className="profile-section-header">
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path fill="currentColor" d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
-              </svg>
-              <span>Информация</span>
-            </div>
-            <div className="profile-info-list">
+            <div className="profile-info-section">
               <div className="profile-info-item">
-                <span className="profile-info-label">Username</span>
-                <span className="profile-info-value">@{username}</span>
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                  <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+                <span>{profile.status}</span>
               </div>
-              {age && (
-                <div className="profile-info-item">
-                  <span className="profile-info-label">Возраст</span>
-                  <span className="profile-info-value">{age} лет</span>
-                </div>
-              )}
             </div>
-          </div>
+          )}
 
-          <div className="profile-section">
-            <div className="profile-section-header">
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
-              </svg>
-              <span>Безопасность</span>
+          {profile?.bio && (
+            <div className="profile-info-section">
+              <h3>О себе</h3>
+              <p>{profile.bio}</p>
             </div>
-            <p className="profile-security-note">
-              Все сообщения защищены сквозным шифрованием
-            </p>
-          </div>
-        </div>
+          )}
 
-        <div className="profile-actions">
-          <button className="profile-action-btn">
-            <svg viewBox="0 0 24 24" width="24" height="24">
-              <path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
-            </svg>
-            <span>Написать сообщение</span>
-          </button>
-          <button className="profile-action-btn profile-action-btn-danger">
-            <svg viewBox="0 0 24 24" width="24" height="24">
-              <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.59-13L12 10.59 8.41 7 7 8.41 10.59 12 7 15.59 8.41 17 12 13.41 15.59 17 17 15.59 13.41 12 17 8.41z"/>
-            </svg>
-            <span>Заблокировать</span>
-          </button>
+          {profile?.birthdate && (
+            <div className="profile-info-section">
+              <div className="profile-info-item">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                  <path fill="currentColor" d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/>
+                </svg>
+                <span>Дата рождения: {new Date(profile.birthdate).toLocaleDateString()}</span>
+              </div>
+            </div>
+          )}
+
+          {currentUser !== username && (
+            <div className="profile-actions">
+              <button 
+                className={`profile-action-btn ${isBlocked ? 'unblock' : 'block'}`}
+                onClick={handleBlockToggle}
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                  <path fill="currentColor" d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M12,6A6,6 0 0,1 18,12C18,14.22 16.79,16.16 15,17.2V15A4,4 0 0,0 11,11H13A2,2 0 0,1 15,13V15.17C14.07,15.71 13,16 12,16A6,6 0 0,1 6,12A6,6 0 0,1 12,6Z"/>
+                </svg>
+                {isBlocked ? 'Разблокировать' : 'Заблокировать'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

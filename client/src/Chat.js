@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ProfileView from './ProfileView.js';
 import ProfileEdit from './ProfileEdit.js';
+import ContextMenu from './ContextMenu.js';
 import './Chat.css';
 
 const Chat = ({ username, onLogout, authManager }) => {
@@ -16,11 +17,13 @@ const Chat = ({ username, onLogout, authManager }) => {
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileAvatars, setProfileAvatars] = useState({});
   const [myProfile, setMyProfile] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [blockedUsers, setBlockedUsers] = useState(new Set());
+  const [blockStatus, setBlockStatus] = useState(null);
   const messagesEndRef = useRef(null);
   const searchTimeoutRef = useRef(null);
   const wsRef = useRef(null);
 
-  // WebSocket подключение
   useEffect(() => {
     const connectWebSocket = () => {
       const ws = new WebSocket('ws://localhost:3001');
@@ -36,12 +39,27 @@ const Chat = ({ username, onLogout, authManager }) => {
           
           if (data.type === 'new_message') {
             console.log('New message from:', data.from);
-            pollMessages(); // Получить новые сообщения
+            pollMessages();
           } else if (data.type === 'profile_updated') {
             console.log('Profile updated:', data.username);
-            // Инвалидировать кэш и перезагрузить аватарку
             invalidateProfileCache(data.username);
             loadProfileAvatarsBatch([data.username]);
+          } else if (data.type === 'blocked') {
+            console.log('Blocked by:', data.by);
+            setBlockedUsers(prev => new Set(prev).add(data.by));
+            if (selectedChat?.username === data.by) {
+              checkBlockStatus(data.by);
+            }
+          } else if (data.type === 'unblocked') {
+            console.log('Unblocked by:', data.by);
+            setBlockedUsers(prev => {
+              const updated = new Set(prev);
+              updated.delete(data.by);
+              return updated;
+            });
+            if (selectedChat?.username === data.by) {
+              checkBlockStatus(data.by);
+            }
           }
         } catch (error) {
           console.error('WebSocket message error:', error);
@@ -54,7 +72,7 @@ const Chat = ({ username, onLogout, authManager }) => {
       
       ws.onclose = () => {
         console.log('WebSocket disconnected, reconnecting...');
-        setTimeout(connectWebSocket, 3000); // Переподключение через 3 сек
+        setTimeout(connectWebSocket, 3000);
       };
       
       wsRef.current = ws;
@@ -82,6 +100,12 @@ const Chat = ({ username, onLogout, authManager }) => {
       loadProfileAvatarsBatch(missingAvatars);
     }
   }, [contacts]);
+
+  useEffect(() => {
+    if (selectedChat) {
+      checkBlockStatus(selectedChat.username);
+    }
+  }, [selectedChat]);
 
   const loadMyProfile = async () => {
     try {
@@ -139,6 +163,121 @@ const Chat = ({ username, onLogout, authManager }) => {
     setTimeout(() => {
       loadProfileAvatarsBatch([username]);
     }, 500);
+  };
+
+  const checkBlockStatus = async (contactUsername) => {
+    try {
+      const response = await fetch(`${authManager.serverUrl}/block-status/${username}/${contactUsername}`);
+      if (response.ok) {
+        const data = await response.json();
+        setBlockStatus(data);
+        if (data.blocked) {
+          setBlockedUsers(prev => new Set(prev).add(contactUsername));
+        } else {
+          setBlockedUsers(prev => {
+            const updated = new Set(prev);
+            updated.delete(contactUsername);
+            return updated;
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to check block status:', error);
+    }
+  };
+
+  const handleContextMenu = (e, contact) => {
+    e.preventDefault();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      contact
+    });
+  };
+
+  const handleClearChat = async (contactUsername) => {
+    if (!window.confirm(`Очистить историю с ${contactUsername}?`)) return;
+    
+    try {
+      setMessages(prev => ({
+        ...prev,
+        [contactUsername]: []
+      }));
+      console.log(`История с ${contactUsername} очищена локально`);
+    } catch (error) {
+      console.error('Failed to clear chat:', error);
+    }
+  };
+
+  const handleDeleteChat = async (contactUsername) => {
+    if (!window.confirm(`Удалить чат с ${contactUsername}? Это действие нельзя отменить.`)) return;
+    
+    try {
+      const response = await fetch(`${authManager.serverUrl}/chat/${username}/${contactUsername}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        setContacts(prev => prev.filter(c => c.username !== contactUsername));
+        setMessages(prev => {
+          const updated = { ...prev };
+          delete updated[contactUsername];
+          return updated;
+        });
+        
+        if (selectedChat?.username === contactUsername) {
+          setSelectedChat(null);
+        }
+        
+        console.log(`Чат с ${contactUsername} удалён`);
+      }
+    } catch (error) {
+      console.error('Failed to delete chat:', error);
+    }
+  };
+
+  const handleBlockUser = async (contactUsername) => {
+    try {
+      const response = await fetch(`${authManager.serverUrl}/block`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocker: username, blocked: contactUsername })
+      });
+      
+      if (response.ok) {
+        setBlockedUsers(prev => new Set(prev).add(contactUsername));
+        if (selectedChat?.username === contactUsername) {
+          checkBlockStatus(contactUsername);
+        }
+        console.log(`${contactUsername} заблокирован`);
+      }
+    } catch (error) {
+      console.error('Failed to block user:', error);
+    }
+  };
+
+  const handleUnblockUser = async (contactUsername) => {
+    try {
+      const response = await fetch(`${authManager.serverUrl}/unblock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocker: username, blocked: contactUsername })
+      });
+      
+      if (response.ok) {
+        setBlockedUsers(prev => {
+          const updated = new Set(prev);
+          updated.delete(contactUsername);
+          return updated;
+        });
+        if (selectedChat?.username === contactUsername) {
+          checkBlockStatus(contactUsername);
+        }
+        console.log(`${contactUsername} разблокирован`);
+      }
+    } catch (error) {
+      console.error('Failed to unblock user:', error);
+    }
   };
 
   const pollMessages = async () => {
@@ -258,7 +397,7 @@ const Chat = ({ username, onLogout, authManager }) => {
 
   useEffect(() => {
     pollMessages();
-    const interval = setInterval(pollMessages, 5000); // Увеличил до 5 сек, т.к. WebSocket теперь уведомляет
+    const interval = setInterval(pollMessages, 5000);
     return () => clearInterval(interval);
   }, [authManager]);
 
@@ -364,6 +503,11 @@ const Chat = ({ username, onLogout, authManager }) => {
   const handleSendMessage = async () => {
     if (!messageText.trim() || !selectedChat) return;
     
+    if (blockStatus?.blocked) {
+      alert('Невозможно отправить сообщение - пользователь заблокирован');
+      return;
+    }
+    
     setLoading(true);
     try {
       await authManager.sendMessage(selectedChat.username, messageText);
@@ -389,7 +533,11 @@ const Chat = ({ username, onLogout, authManager }) => {
       console.log('Message sent successfully');
     } catch (error) {
       console.error('Failed to send message:', error);
-      alert('Не удалось отправить сообщение: ' + error.message);
+      if (error.message.includes('blocked')) {
+        alert('Невозможно отправить сообщение - пользователь заблокирован');
+      } else {
+        alert('Не удалось отправить сообщение: ' + error.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -407,13 +555,20 @@ const Chat = ({ username, onLogout, authManager }) => {
   );
 
   const currentMessages = selectedChat ? (messages[selectedChat.username] || []) : [];
+  
+  const isBlocked = blockStatus?.blocked;
+  const whoBlockedWhom = isBlocked ? (blockStatus.blocker === username ? 'Вы заблокировали этого пользователя' : 'Вы заблокированы этим пользователем') : null;
 
   return (
     <div className="chat-page">
       {viewingProfile && (
         <ProfileView 
           username={viewingProfile}
+          currentUser={username}
           onClose={() => setViewingProfile(null)}
+          onBlock={handleBlockUser}
+          onUnblock={handleUnblockUser}
+          isBlocked={blockedUsers.has(viewingProfile)}
           authManager={authManager}
         />
       )}
@@ -423,6 +578,47 @@ const Chat = ({ username, onLogout, authManager }) => {
           username={username}
           onClose={handleProfileEditClose}
           authManager={authManager}
+        />
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          items={[
+            {
+              label: 'Очистить историю',
+              icon: (
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                  <path fill="currentColor" d="M19.36,2.72L20.78,4.14L15.06,9.85C16.13,11.39 16.28,13.24 15.38,14.44L9.06,8.12C10.26,7.22 12.11,7.37 13.65,8.44L19.36,2.72M5.93,17.57C3.92,15.56 2.69,13.16 2.35,10.92L7.23,8.83L14.67,16.27L12.58,21.15C10.34,20.81 7.94,19.58 5.93,17.57Z"/>
+                </svg>
+              ),
+              onClick: () => handleClearChat(contextMenu.contact.username)
+            },
+            {
+              label: blockedUsers.has(contextMenu.contact.username) ? 'Разблокировать' : 'Заблокировать',
+              icon: (
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                  <path fill="currentColor" d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M12,6A6,6 0 0,1 18,12C18,14.22 16.79,16.16 15,17.2V15A4,4 0 0,0 11,11H13A2,2 0 0,1 15,13V15.17C14.07,15.71 13,16 12,16A6,6 0 0,1 6,12A6,6 0 0,1 12,6Z"/>
+                </svg>
+              ),
+              onClick: () => blockedUsers.has(contextMenu.contact.username) 
+                ? handleUnblockUser(contextMenu.contact.username)
+                : handleBlockUser(contextMenu.contact.username)
+            },
+            { divider: true },
+            {
+              label: 'Удалить чат',
+              icon: (
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                  <path fill="currentColor" d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                </svg>
+              ),
+              danger: true,
+              onClick: () => handleDeleteChat(contextMenu.contact.username)
+            }
+          ]}
         />
       )}
 
@@ -506,6 +702,7 @@ const Chat = ({ username, onLogout, authManager }) => {
                   key={contact.id}
                   className={`contact-item ${selectedChat?.id === contact.id ? 'active' : ''}`}
                   onClick={() => setSelectedChat(contact)}
+                  onContextMenu={(e) => handleContextMenu(e, contact)}
                 >
                   <Avatar username={contact.username} size={50} />
                   <div className="contact-info">
@@ -589,42 +786,53 @@ const Chat = ({ username, onLogout, authManager }) => {
               </div>
 
               <div className="message-input-container">
-                <button className="icon-btn" title="Прикрепить файл">
-                  <svg viewBox="0 0 24 24" width="24" height="24">
-                    <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-                  </svg>
-                </button>
-                <input
-                  type="text"
-                  placeholder="Введите сообщение..."
-                  className="message-input"
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  disabled={loading}
-                />
-                <button className="icon-btn" title="Эмодзи">
-                  <svg viewBox="0 0 24 24" width="24" height="24">
-                    <path fill="currentColor" d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
-                  </svg>
-                </button>
-                {messageText.trim() ? (
-                  <button 
-                    className="send-btn" 
-                    onClick={handleSendMessage} 
-                    title="Отправить"
-                    disabled={loading}
-                  >
+                {isBlocked ? (
+                  <div className="blocked-input-message">
                     <svg viewBox="0 0 24 24" width="24" height="24">
-                      <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                      <path fill="currentColor" d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M12,6A6,6 0 0,1 18,12C18,14.22 16.79,16.16 15,17.2V15A4,4 0 0,0 11,11H13A2,2 0 0,1 15,13V15.17C14.07,15.71 13,16 12,16A6,6 0 0,1 6,12A6,6 0 0,1 12,6Z"/>
                     </svg>
-                  </button>
+                    <span>{whoBlockedWhom}</span>
+                  </div>
                 ) : (
-                  <button className="send-btn" title="Голосовое сообщение">
-                    <svg viewBox="0 0 24 24" width="24" height="24">
-                      <path fill="currentColor" d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
-                    </svg>
-                  </button>
+                  <>
+                    <button className="icon-btn" title="Прикрепить файл">
+                      <svg viewBox="0 0 24 24" width="24" height="24">
+                        <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                      </svg>
+                    </button>
+                    <input
+                      type="text"
+                      placeholder="Введите сообщение..."
+                      className="message-input"
+                      value={messageText}
+                      onChange={(e) => setMessageText(e.target.value)}
+                      onKeyPress={handleKeyPress}
+                      disabled={loading}
+                    />
+                    <button className="icon-btn" title="Эмодзи">
+                      <svg viewBox="0 0 24 24" width="24" height="24">
+                        <path fill="currentColor" d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
+                      </svg>
+                    </button>
+                    {messageText.trim() ? (
+                      <button 
+                        className="send-btn" 
+                        onClick={handleSendMessage} 
+                        title="Отправить"
+                        disabled={loading}
+                      >
+                        <svg viewBox="0 0 24 24" width="24" height="24">
+                          <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                        </svg>
+                      </button>
+                    ) : (
+                      <button className="send-btn" title="Голосовое сообщение">
+                        <svg viewBox="0 0 24 24" width="24" height="24">
+                          <path fill="currentColor" d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
+                        </svg>
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </>
