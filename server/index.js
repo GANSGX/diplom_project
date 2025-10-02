@@ -2,25 +2,76 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const { WebSocketServer } = require('ws');
+const http = require('http');
 
 dotenv.config();
 
 const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
 
 app.use(cors({
   origin: 'http://localhost:3000',
   credentials: true
 }));
 
-app.use(express.json({ limit: '10mb' })); // Увеличил лимит для base64 аватаров
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 const PORT = process.env.PORT || 3001;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/chat_app';
 
+// ===== WEBSOCKET =====
+
+const clients = new Map(); // username -> ws connection
+
+wss.on('connection', (ws) => {
+  let username = null;
+
+  ws.on('message', (data) => {
+    try {
+      const message = JSON.parse(data.toString());
+      
+      if (message.type === 'register') {
+        username = message.username;
+        clients.set(username, ws);
+        console.log(`✅ WebSocket: ${username} connected (${clients.size} online)`);
+      }
+    } catch (error) {
+      console.error('WebSocket message error:', error);
+    }
+  });
+
+  ws.on('close', () => {
+    if (username) {
+      clients.delete(username);
+      console.log(`❌ WebSocket: ${username} disconnected (${clients.size} online)`);
+    }
+  });
+
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+  });
+});
+
+function broadcastToUser(username, event) {
+  const client = clients.get(username);
+  if (client && client.readyState === 1) { // 1 = OPEN
+    client.send(JSON.stringify(event));
+  }
+}
+
+function broadcastToAll(event, excludeUser = null) {
+  clients.forEach((ws, user) => {
+    if (user !== excludeUser && ws.readyState === 1) {
+      ws.send(JSON.stringify(event));
+    }
+  });
+}
+
 // ===== СХЕМЫ =====
 
-// Схема User
 const userSchema = new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   publicBundle: {
@@ -36,7 +87,6 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', userSchema);
 
-// Схема Message
 const messageSchema = new mongoose.Schema({
   sender: { type: String, required: true },
   recipient: { type: String, required: true },
@@ -51,7 +101,6 @@ const messageSchema = new mongoose.Schema({
 });
 const Message = mongoose.model('Message', messageSchema);
 
-// Схема Profile
 const profileSchema = new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   displayName: String,
@@ -74,11 +123,11 @@ mongoose.connect(MONGODB_URI)
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
-    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    websocket: `${clients.size} clients connected`
   });
 });
 
-// Регистрация пользователя
 app.post('/register', async (req, res) => {
   const { username, publicBundle } = req.body;
   if (!username || !publicBundle) {
@@ -114,7 +163,6 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Получить публичный bundle пользователя
 app.get('/bundle/:username', async (req, res) => {
   const { username } = req.params;
   try {
@@ -144,7 +192,6 @@ app.get('/bundle/:username', async (req, res) => {
   }
 });
 
-// Отправить сообщение
 app.post('/send', async (req, res) => {
   const { sender, recipient, message } = req.body;
   if (!recipient || !message) {
@@ -168,6 +215,13 @@ app.post('/send', async (req, res) => {
     });
     await msg.save();
     console.log(`✅ Message sent from ${sender} to ${recipient}`);
+    
+    // Отправить WebSocket уведомление получателю
+    broadcastToUser(recipient, {
+      type: 'new_message',
+      from: sender
+    });
+    
     res.json({ status: 'ok', messageId: msg._id });
   } catch (error) {
     console.error('Send message error:', error);
@@ -175,7 +229,6 @@ app.post('/send', async (req, res) => {
   }
 });
 
-// Получить сообщения для пользователя
 app.get('/fetch/:username', async (req, res) => {
   const { username } = req.params;
   try {
@@ -196,7 +249,6 @@ app.get('/fetch/:username', async (req, res) => {
   }
 });
 
-// Подтвердить получение сообщения (удалить с сервера)
 app.post('/ack', async (req, res) => {
   const { messageId } = req.body;
   if (!messageId) {
@@ -215,7 +267,6 @@ app.post('/ack', async (req, res) => {
   }
 });
 
-// Проверить статус сообщения
 app.get('/status/:messageId', async (req, res) => {
   const { messageId } = req.params;
   try {
@@ -232,11 +283,10 @@ app.get('/status/:messageId', async (req, res) => {
 
 // ===== ПРОФИЛИ =====
 
-// Получить профиль пользователя
 app.get('/profile/:username', async (req, res) => {
   const { username } = req.params;
   try {
-    const profile = await Profile.findOne({ username });
+    const profile = await Profile.findOne({ username }).lean();
     if (!profile) {
       return res.json({
         username,
@@ -254,7 +304,6 @@ app.get('/profile/:username', async (req, res) => {
   }
 });
 
-// Обновить профиль пользователя
 app.put('/profile/:username', async (req, res) => {
   const { username } = req.params;
   const { displayName, avatar, status, bio, birthdate } = req.body;
@@ -273,6 +322,14 @@ app.put('/profile/:username', async (req, res) => {
       { upsert: true, new: true }
     );
     console.log(`✅ Profile updated: ${username}`);
+    
+    // Отправить WebSocket уведомление всем онлайн-юзерам
+    broadcastToAll({
+      type: 'profile_updated',
+      username: username,
+      avatar: avatar
+    }, username); // Исключаем самого себя
+    
     res.json({ status: 'ok', profile });
   } catch (error) {
     console.error('Update profile error:', error);
@@ -280,9 +337,54 @@ app.put('/profile/:username', async (req, res) => {
   }
 });
 
+app.post('/profiles/batch', async (req, res) => {
+  const { usernames } = req.body;
+  
+  if (!Array.isArray(usernames) || usernames.length === 0) {
+    return res.status(400).json({ error: 'Invalid usernames array' });
+  }
+
+  try {
+    const profiles = await Profile.find({ 
+      username: { $in: usernames } 
+    }).lean();
+    
+    const profileMap = {};
+    profiles.forEach(p => {
+      profileMap[p.username] = {
+        username: p.username,
+        displayName: p.displayName || '',
+        avatar: p.avatar || '',
+        status: p.status || '',
+        bio: p.bio || '',
+        birthdate: p.birthdate || ''
+      };
+    });
+    
+    usernames.forEach(username => {
+      if (!profileMap[username]) {
+        profileMap[username] = {
+          username,
+          displayName: '',
+          avatar: '',
+          status: '',
+          bio: '',
+          birthdate: ''
+        };
+      }
+    });
+    
+    res.json(profileMap);
+  } catch (error) {
+    console.error('Batch profiles fetch error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ===== ЗАПУСК СЕРВЕРА =====
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 Health check: http://localhost:${PORT}/health`);
+  console.log(`🔌 WebSocket ready`);
 });

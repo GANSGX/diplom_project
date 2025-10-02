@@ -50,9 +50,35 @@ const ProfileEdit = ({ username, onClose, authManager }) => {
 
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64 = reader.result;
-        setProfile({ ...profile, avatar: base64 });
-        setAvatarPreview(base64);
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxSize = 300;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxSize) {
+              height *= maxSize / width;
+              width = maxSize;
+            }
+          } else {
+            if (height > maxSize) {
+              width *= maxSize / height;
+              height = maxSize;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+          setProfile({ ...profile, avatar: compressedBase64 });
+          setAvatarPreview(compressedBase64);
+        };
+        img.src = reader.result;
       };
       reader.readAsDataURL(file);
     }
