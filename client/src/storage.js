@@ -222,7 +222,6 @@ class ParanoidStorage {
     });
   }
 
-  // ✅ ДОБАВЛЕН МЕТОД: получить все контакты
   async getAllContacts() {
     const transaction = this.db.transaction(['contacts'], 'readonly');
     const store = transaction.objectStore('contacts');
@@ -247,6 +246,21 @@ class ParanoidStorage {
       };
       
       request.onerror = () => reject('Не удалось получить контакты');
+    });
+  }
+
+  async deleteContact(username) {
+    const transaction = this.db.transaction(['contacts'], 'readwrite');
+    const store = transaction.objectStore('contacts');
+
+    return new Promise((resolve, reject) => {
+      const request = store.delete(username);
+      
+      request.onsuccess = () => {
+        console.log(`Контакт ${username} удалён из хранилища`);
+        resolve(true);
+      };
+      request.onerror = () => reject('Не удалось удалить контакт');
     });
   }
 
@@ -306,6 +320,31 @@ class ParanoidStorage {
       };
       
       request.onerror = () => reject('Не удалось получить историю');
+    });
+  }
+
+  async clearChatHistory(username) {
+    const transaction = this.db.transaction(['messages'], 'readwrite');
+    const store = transaction.objectStore('messages');
+    const index = store.index('chatId');
+
+    return new Promise((resolve, reject) => {
+      const request = index.getAllKeys(username);
+      
+      request.onsuccess = () => {
+        const keys = request.result;
+        let deletedCount = 0;
+        
+        keys.forEach(key => {
+          store.delete(key);
+          deletedCount++;
+        });
+        
+        console.log(`Удалено ${deletedCount} сообщений с ${username}`);
+        resolve(deletedCount);
+      };
+      
+      request.onerror = () => reject('Не удалось очистить историю');
     });
   }
 

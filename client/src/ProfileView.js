@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import './ProfileView.css';
+import './ProfileEdit.css';
 
 const ProfileView = ({ username, currentUser, onClose, onBlock, onUnblock, isBlocked, authManager }) => {
   const [profile, setProfile] = useState(null);
