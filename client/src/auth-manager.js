@@ -29,14 +29,56 @@ class AuthManager {
     this.storage = null;
     this.currentUser = null;
     this.serverUrl = 'http://localhost:3001';
-    this.currentIdentity = null; // ДОБАВЛЕНО: хранить текущий identity
+    this.currentIdentity = null;
+  }
+
+  // 🔒 Сохранение сессии (НЕ БЕЗОПАСНО для продакшена!)
+  saveSession(username, encryptedKey, masterPassword) {
+    if (!isBrowser) return;
+    
+    // ВНИМАНИЕ: хранение мастер-пароля в localStorage НЕ БЕЗОПАСНО
+    // Только для разработки! В продакшене используйте session tokens
+    const sessionData = {
+      username,
+      encryptedKey,
+      masterPassword, // ⚠️ НЕБЕЗОПАСНО
+      timestamp: Date.now()
+    };
+    
+    localStorage.setItem('securechat_session', JSON.stringify(sessionData));
+  }
+
+  getSession() {
+    if (!isBrowser) return null;
+    
+    const sessionData = localStorage.getItem('securechat_session');
+    if (!sessionData) return null;
+    
+    try {
+      const parsed = JSON.parse(sessionData);
+      
+      // Сессия действительна 7 дней
+      const MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+      if (Date.now() - parsed.timestamp > MAX_AGE) {
+        this.clearSession();
+        return null;
+      }
+      
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  clearSession() {
+    if (!isBrowser) return;
+    localStorage.removeItem('securechat_session');
   }
 
   async register(username, masterPassword) {
     try {
-      // Генерируем НОВЫЙ identity только при регистрации
       const signalIdentity = await generateSignalIdentity();
-      this.currentIdentity = signalIdentity; // Сохраняем в памяти
+      this.currentIdentity = signalIdentity;
       
       if (isBrowser) {
         this.storage = new ParanoidStorage();
@@ -54,7 +96,6 @@ class AuthManager {
         preKeys: signalIdentity.preKeys
       };
       
-      // Отправляем на сервер только при регистрации
       const response = await fetch(`${this.serverUrl}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -67,10 +108,13 @@ class AuthManager {
         throw new Error(result.error || 'Registration failed');
       }
       
-      // Экспортируем для сохранения в файл
       const encryptedKey = await exportSignalIdentity(masterPassword);
       
       this.currentUser = username;
+      
+      // Сохраняем сессию
+      this.saveSession(username, encryptedKey, masterPassword);
+      
       console.log(`Пользователь ${username} зарегистрирован`);
       
       return { 
@@ -86,13 +130,9 @@ class AuthManager {
 
   async login(username, masterPassword, encryptedKeyContent) {
     try {
-      // ИМПОРТИРУЕМ существующий identity из файла
       const signalIdentity = await importSignalIdentity(encryptedKeyContent, masterPassword);
-      this.currentIdentity = signalIdentity; // Сохраняем в памяти
+      this.currentIdentity = signalIdentity;
       
-      console.log('Loaded identity key (first 10):', signalIdentity.identityKey.slice(0, 10));
-      
-      // ПРОВЕРЯЕМ что пользователь существует на сервере
       const response = await fetch(`${this.serverUrl}/bundle/${username}`);
       
       if (!response.ok) {
@@ -103,17 +143,12 @@ class AuthManager {
       }
       
       const serverBundle = await response.json();
-      console.log('Server identity key (first 10):', serverBundle.identityKey.slice(0, 10));
       
-      // ПРОВЕРКА: ключи должны совпадать
       const keysMatch = JSON.stringify(signalIdentity.identityKey) === JSON.stringify(serverBundle.identityKey);
-      console.log('Identity keys match:', keysMatch);
       
       if (!keysMatch) {
         throw new Error('Ключи не совпадают! Вы используете неправильный файл ключа для этого аккаунта.');
       }
-      
-      console.log('Пользователь найден на сервере');
       
       if (isBrowser) {
         this.storage = new ParanoidStorage();
@@ -122,16 +157,34 @@ class AuthManager {
         
         const identityToStore = { username, signalIdentity };
         await this.storage.storeUserIdentity(identityToStore);
-        console.log('Identity сохранен в IndexedDB');
       }
       
       this.currentUser = username;
+      
+      // Сохраняем сессию
+      this.saveSession(username, encryptedKeyContent, masterPassword);
+      
       console.log(`Пользователь ${username} успешно вошел`);
       
       return { success: true, username };
     } catch (error) {
       console.error('Login error:', error);
       throw error;
+    }
+  }
+
+  async restoreSession() {
+    const session = this.getSession();
+    if (!session) return null;
+    
+    try {
+      await this.login(session.username, session.masterPassword, session.encryptedKey);
+      console.log('Сессия восстановлена');
+      return session.username;
+    } catch (error) {
+      console.error('Failed to restore session:', error);
+      this.clearSession();
+      return null;
     }
   }
 
@@ -283,10 +336,6 @@ class AuthManager {
         throw new Error('Recipient has invalid or empty identity key');
       }
       
-      console.log('=== ENCRYPT START ===');
-      console.log('Recipient identity key (first 10):', recipientPublicBundle.identityKey.slice(0, 10));
-      console.log('Recipient identity key length:', recipientPublicBundle.identityKey.length);
-      
       const crypto = getCrypto();
       
       const ephemeralKeyPair = await crypto.subtle.generateKey(
@@ -296,8 +345,6 @@ class AuthManager {
       );
 
       const ephemeralPublicRaw = await crypto.subtle.exportKey("raw", ephemeralKeyPair.publicKey);
-      console.log('Ephemeral public key (first 10):', Array.from(new Uint8Array(ephemeralPublicRaw)).slice(0, 10));
-      console.log('Ephemeral public key length:', ephemeralPublicRaw.byteLength);
 
       const recipientPublicKey = await crypto.subtle.importKey(
         "raw",
@@ -324,8 +371,6 @@ class AuthManager {
 
       const ephemeralPublic = await crypto.subtle.exportKey("raw", ephemeralKeyPair.publicKey);
 
-      console.log('=== ENCRYPT END ===');
-
       return {
         type: 1,
         body: Array.from(new Uint8Array(encrypted)),
@@ -341,17 +386,11 @@ class AuthManager {
 
   async _decryptMessage(encryptedMsg) {
     try {
-      console.log('=== DECRYPT START ===');
-      console.log('Encrypted message ephemeral key (first 10):', encryptedMsg.ephemeralKey.slice(0, 10));
-      console.log('Encrypted message ephemeral key length:', encryptedMsg.ephemeralKey.length);
-      
       const crypto = getCrypto();
       
-      // ИСПОЛЬЗУЕМ currentIdentity вместо загрузки из storage
       const identity = this.currentIdentity || await this.storage.getUserIdentity();
       
       if (!identity || !identity.identityKey) {
-        // Если currentIdentity нет, пробуем из storage
         const storedIdentity = await this.storage.getUserIdentity();
         if (!storedIdentity || !storedIdentity.signalIdentity) {
           throw new Error('Identity not found');
@@ -361,10 +400,6 @@ class AuthManager {
       
       const signalIdentity = this.currentIdentity.privateKey ? this.currentIdentity : this.currentIdentity.signalIdentity;
       
-      console.log('Our identity key (first 10):', signalIdentity.identityKey.slice(0, 10));
-      console.log('Our private key (first 10):', signalIdentity.privateKey.slice(0, 10));
-      console.log('Our private key length:', signalIdentity.privateKey.length);
-      
       const ourPrivateKey = await crypto.subtle.importKey(
         "pkcs8",
         new Uint8Array(signalIdentity.privateKey),
@@ -372,8 +407,6 @@ class AuthManager {
         false,
         ["deriveKey", "deriveBits"]
       );
-
-      console.log('Our private key imported successfully');
 
       const senderEphemeralPublic = await crypto.subtle.importKey(
         "raw",
@@ -383,8 +416,6 @@ class AuthManager {
         []
       );
 
-      console.log('Sender ephemeral public key imported successfully');
-
       const sharedSecret = await crypto.subtle.deriveKey(
         { name: "ECDH", public: senderEphemeralPublic },
         ourPrivateKey,
@@ -393,15 +424,11 @@ class AuthManager {
         ["decrypt"]
       );
 
-      console.log('Shared secret derived');
-
       const decrypted = await crypto.subtle.decrypt(
         { name: "AES-GCM", iv: new Uint8Array(encryptedMsg.iv) },
         sharedSecret,
         new Uint8Array(encryptedMsg.body)
       );
-
-      console.log('=== DECRYPT END ===');
 
       return new TextDecoder().decode(decrypted);
     } catch (error) {
@@ -413,7 +440,8 @@ class AuthManager {
   logout() {
     if (this.storage) this.storage.destroy();
     this.currentUser = null;
-    this.currentIdentity = null; // Очищаем identity
+    this.currentIdentity = null;
+    this.clearSession();
     console.log('Вышли');
   }
 }
