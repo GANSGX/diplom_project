@@ -37,6 +37,22 @@ wss.on('connection', (ws) => {
         username = message.username;
         clients.set(username, ws);
         console.log(`✅ WebSocket: ${username} connected (${clients.size} online)`);
+      } else if (message.type === 'message_delivered') {
+        // Подтверждение доставки
+        broadcastToUser(message.sender, {
+          type: 'message_delivered',
+          messageId: message.messageId,
+          deliveredBy: username,
+          timestamp: Date.now()
+        });
+      } else if (message.type === 'message_read') {
+        // Подтверждение прочтения
+        broadcastToUser(message.sender, {
+          type: 'message_read',
+          messageIds: message.messageIds,
+          readBy: username,
+          timestamp: Date.now()
+        });
       }
     } catch (error) {
       console.error('WebSocket message error:', error);
@@ -70,6 +86,10 @@ function broadcastToAll(event, excludeUser = null) {
   });
 }
 
+function isUserOnline(username) {
+  return clients.has(username);
+}
+
 // ===== СХЕМЫ =====
 
 const userSchema = new mongoose.Schema({
@@ -97,6 +117,13 @@ const messageSchema = new mongoose.Schema({
     ephemeralKey: [Number],
     iv: [Number]
   },
+  status: { 
+    type: String, 
+    enum: ['sent', 'delivered', 'read'], 
+    default: 'sent' 
+  },
+  deliveredAt: { type: Date, default: null },
+  readAt: { type: Date, default: null },
   createdAt: { type: Date, expires: '3d', default: Date.now }
 });
 const Message = mongoose.model('Message', messageSchema);
@@ -223,6 +250,9 @@ app.post('/send', async (req, res) => {
       return res.status(403).json({ error: 'Cannot send message - user blocked' });
     }
     
+    // Проверяем, онлайн ли получатель
+    const recipientOnline = isUserOnline(recipient);
+    
     const msg = new Message({
       sender: sender || 'unknown',
       recipient,
@@ -232,17 +262,35 @@ app.post('/send', async (req, res) => {
         timestamp: message.timestamp,
         ephemeralKey: message.ephemeralKey,
         iv: message.iv
-      }
+      },
+      status: recipientOnline ? 'delivered' : 'sent',
+      deliveredAt: recipientOnline ? new Date() : null
     });
     await msg.save();
-    console.log(`✅ Message sent from ${sender} to ${recipient}`);
+    console.log(`✅ Message sent from ${sender} to ${recipient} (${msg.status})`);
     
+    // Уведомляем получателя
     broadcastToUser(recipient, {
       type: 'new_message',
-      from: sender
+      from: sender,
+      messageId: msg._id
     });
     
-    res.json({ status: 'ok', messageId: msg._id });
+    // Если получатель онлайн, сразу отправляем подтверждение доставки отправителю
+    if (recipientOnline) {
+      broadcastToUser(sender, {
+        type: 'message_delivered',
+        messageId: msg._id,
+        deliveredBy: recipient,
+        timestamp: Date.now()
+      });
+    }
+    
+    res.json({ 
+      status: 'ok', 
+      messageId: msg._id,
+      deliveryStatus: msg.status
+    });
   } catch (error) {
     console.error('Send message error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -258,10 +306,21 @@ app.get('/fetch/:username', async (req, res) => {
       return res.json([]);
     }
     
+    // Автоматически помечаем как доставленные
+    const messageIds = messages.map(m => m._id);
+    await Message.updateMany(
+      { _id: { $in: messageIds }, status: 'sent' },
+      { 
+        status: 'delivered',
+        deliveredAt: new Date()
+      }
+    );
+    
     res.json(messages.map(msg => ({
       messageId: msg._id,
       sender: msg.sender,
-      message: msg.message
+      message: msg.message,
+      status: 'delivered'
     })));
   } catch (error) {
     console.error('Fetch messages error:', error);
@@ -287,6 +346,60 @@ app.post('/ack', async (req, res) => {
   }
 });
 
+// НОВЫЙ: Пометить сообщения как прочитанные
+app.post('/mark-read', async (req, res) => {
+  const { messageIds, reader } = req.body;
+  if (!messageIds || !Array.isArray(messageIds) || messageIds.length === 0) {
+    return res.status(400).json({ error: 'Missing messageIds' });
+  }
+  try {
+    const result = await Message.updateMany(
+      { _id: { $in: messageIds } },
+      { 
+        status: 'read',
+        readAt: new Date()
+      }
+    );
+    
+    console.log(`✅ Marked ${result.modifiedCount} messages as read by ${reader}`);
+    res.json({ status: 'ok', updated: result.modifiedCount });
+  } catch (error) {
+    console.error('Mark read error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// НОВЫЙ: Получить количество непрочитанных
+app.get('/unread-count/:username', async (req, res) => {
+  const { username } = req.params;
+  try {
+    const counts = await Message.aggregate([
+      { 
+        $match: { 
+          recipient: username,
+          status: { $ne: 'read' }
+        } 
+      },
+      {
+        $group: {
+          _id: '$sender',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+    
+    const unreadMap = {};
+    counts.forEach(c => {
+      unreadMap[c._id] = c.count;
+    });
+    
+    res.json(unreadMap);
+  } catch (error) {
+    console.error('Unread count error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/status/:messageId', async (req, res) => {
   const { messageId } = req.params;
   try {
@@ -294,7 +407,11 @@ app.get('/status/:messageId', async (req, res) => {
     if (!message) {
       return res.json({ status: 'not_found' });
     }
-    res.json({ status: 'pending' });
+    res.json({ 
+      status: message.status,
+      deliveredAt: message.deliveredAt,
+      readAt: message.readAt
+    });
   } catch (error) {
     console.error('Message status error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -411,13 +528,11 @@ app.post('/block', async (req, res) => {
     await Block.create({ blocker, blocked });
     console.log(`✅ ${blocker} blocked ${blocked}`);
     
-    // Уведомляем заблокированного
     broadcastToUser(blocked, {
       type: 'blocked',
       by: blocker
     });
     
-    // Уведомляем блокирующего (для закрытия чата)
     broadcastToUser(blocker, {
       type: 'block_confirmed',
       username: blocked

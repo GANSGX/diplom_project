@@ -665,3 +665,74 @@
 .blocked-input-message svg {
   flex-shrink: 0;
 }
+
+/* Статусы сообщений (галочки) */
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+
+.message-status {
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.message-status.sent {
+  color: #8b949e;
+}
+
+.message-status.delivered {
+  color: #8b949e;
+}
+
+.message-status.read path {
+  fill: #58a6ff !important;
+}
+
+/* Badge непрочитанных */
+.unread-badge {
+  background: #58a6ff;
+  color: white;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.contact-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.contact-message p {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Анимация badge */
+.unread-badge {
+  animation: badge-pop 0.3s ease;
+}
+
+@keyframes badge-pop {
+  0% {
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}

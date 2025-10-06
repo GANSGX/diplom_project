@@ -176,7 +176,8 @@ class ParanoidStorage {
       username,
       publicKey: publicKeyBundle,
       addedAt: Date.now(),
-      isDeleted: isDeleted  // Флаг удаления
+      isDeleted: isDeleted,
+      unreadCount: 0  // Счётчик непрочитанных
     };
 
     const encrypted = await this._encrypt(contactData);
@@ -283,12 +284,76 @@ class ParanoidStorage {
     });
   }
 
-  async storeMessage(chatWith, messageData, isOutgoing) {
+  // ===== МЕТОДЫ ДЛЯ СЧЁТЧИКОВ НЕПРОЧИТАННЫХ =====
+
+  // Обновить количество непрочитанных для контакта
+  async updateUnreadCount(contactUsername, count) {
+    const contact = await this.getContact(contactUsername);
+    if (!contact) return;
+    
+    const updatedContact = {
+      ...contact,
+      unreadCount: count
+    };
+    
+    const encrypted = await this._encrypt(updatedContact);
+    
+    const transaction = this.db.transaction(['contacts'], 'readwrite');
+    const store = transaction.objectStore('contacts');
+    
+    return new Promise((resolve, reject) => {
+      const request = store.put({
+        id: contactUsername,
+        encrypted: encrypted
+      });
+      
+      request.onsuccess = () => {
+        console.log(`Unread count for ${contactUsername}: ${count}`);
+        resolve(true);
+      };
+      request.onerror = () => reject('Failed to update unread count');
+    });
+  }
+
+  // Получить количество непрочитанных
+  async getUnreadCount(contactUsername) {
+    const contact = await this.getContact(contactUsername);
+    return contact?.unreadCount || 0;
+  }
+
+  // Сбросить счётчик непрочитанных
+  async resetUnreadCount(contactUsername) {
+    return this.updateUnreadCount(contactUsername, 0);
+  }
+
+  // Увеличить счётчик непрочитанных
+  async incrementUnreadCount(contactUsername) {
+    const currentCount = await this.getUnreadCount(contactUsername);
+    return this.updateUnreadCount(contactUsername, currentCount + 1);
+  }
+
+  // Получить все счётчики непрочитанных
+  async getAllUnreadCounts() {
+    const contacts = await this.getAllContacts();
+    const counts = {};
+    
+    for (const contact of contacts) {
+      counts[contact.username] = contact.unreadCount || 0;
+    }
+    
+    return counts;
+  }
+
+  // ===== МЕТОДЫ ДЛЯ СООБЩЕНИЙ СО СТАТУСАМИ =====
+
+  async storeMessage(chatWith, messageData, isOutgoing, messageId = null, status = 'sent') {
     const msgData = {
       chatWith,
       message: messageData,
       isOutgoing,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      messageId: messageId,
+      status: status  // 'sent', 'delivered', 'read'
     };
 
     const encrypted = await this._encrypt(msgData);
@@ -303,7 +368,7 @@ class ParanoidStorage {
       });
       
       request.onsuccess = () => {
-        console.log(`Сообщение с ${chatWith} сохранено`);
+        console.log(`Сообщение с ${chatWith} сохранено (status: ${status})`);
         resolve(request.result);
       };
       request.onerror = () => reject('Не удалось сохранить сообщение');
@@ -340,6 +405,62 @@ class ParanoidStorage {
       
       request.onerror = () => reject('Не удалось получить историю');
     });
+  }
+
+  // Обновить статус сообщения
+  async updateMessageStatus(chatWith, messageId, newStatus) {
+    const transaction = this.db.transaction(['messages'], 'readwrite');
+    const store = transaction.objectStore('messages');
+    const index = store.index('chatId');
+
+    return new Promise(async (resolve, reject) => {
+      const request = index.getAll(chatWith);
+      
+      request.onsuccess = async () => {
+        try {
+          let updated = false;
+          
+          for (const encryptedMsg of request.result) {
+            const decrypted = await this._decrypt(encryptedMsg.encrypted);
+            
+            if (decrypted.messageId === messageId) {
+              // Обновляем статус
+              decrypted.status = newStatus;
+              
+              const reEncrypted = await this._encrypt(decrypted);
+              
+              await new Promise((res, rej) => {
+                const updateReq = store.put({
+                  id: encryptedMsg.id,
+                  chatId: chatWith,
+                  encrypted: reEncrypted
+                });
+                updateReq.onsuccess = () => res();
+                updateReq.onerror = () => rej();
+              });
+              
+              updated = true;
+              console.log(`Message ${messageId} status updated to ${newStatus}`);
+              break;
+            }
+          }
+          
+          resolve(updated);
+        } catch (error) {
+          reject('Failed to update message status');
+        }
+      };
+      
+      request.onerror = () => reject('Failed to get messages');
+    });
+  }
+
+  // Обновить статусы нескольких сообщений
+  async updateMultipleMessageStatuses(chatWith, messageIds, newStatus) {
+    for (const messageId of messageIds) {
+      await this.updateMessageStatus(chatWith, messageId, newStatus);
+    }
+    console.log(`Updated ${messageIds.length} messages to ${newStatus}`);
   }
 
   async clearChatHistory(username) {

@@ -20,9 +20,51 @@ const Chat = ({ username, onLogout, authManager }) => {
   const [contextMenu, setContextMenu] = useState(null);
   const [blockedUsers, setBlockedUsers] = useState(new Set());
   const [blockStatus, setBlockStatus] = useState({});
+  const [unreadCounts, setUnreadCounts] = useState({});
+  const [messageStatuses, setMessageStatuses] = useState({});
   const messagesEndRef = useRef(null);
   const searchTimeoutRef = useRef(null);
   const wsRef = useRef(null);
+  const selectedChatRef = useRef(null);
+
+  // Компонент иконки статуса сообщения
+  const MessageStatusIcon = ({ status }) => {
+    if (status === 'sent') {
+      // Одна галочка серая
+      return (
+        <svg className="message-status sent" viewBox="0 0 18 18" width="18" height="18">
+          <path fill="currentColor" d="M17.394 5.035l-.57-.444a.434.434 0 0 0-.609.076l-6.39 8.198a.38.38 0 0 1-.305.15.38.38 0 0 1-.306-.15l-2.41-3.096a.434.434 0 0 0-.61-.076l-.568.444a.434.434 0 0 0-.076.609l2.978 3.821a.819.819 0 0 0 .647.318c.25 0 .486-.112.647-.318l6.956-8.925a.434.434 0 0 0-.076-.609z"/>
+        </svg>
+      );
+    }
+    
+    if (status === 'delivered') {
+      // Две галочки серые
+      return (
+        <svg className="message-status delivered" viewBox="0 0 18 18" width="18" height="18">
+          <path fill="currentColor" d="M17.394 5.035l-.57-.444a.434.434 0 0 0-.609.076l-6.39 8.198a.38.38 0 0 1-.305.15.38.38 0 0 1-.306-.15l-2.41-3.096a.434.434 0 0 0-.61-.076l-.568.444a.434.434 0 0 0-.076.609l2.978 3.821a.819.819 0 0 0 .647.318c.25 0 .486-.112.647-.318l6.956-8.925a.434.434 0 0 0-.076-.609z"/>
+          <path fill="currentColor" d="M12.394 5.035l-.57-.444a.434.434 0 0 0-.609.076l-6.39 8.198a.38.38 0 0 1-.305.15.38.38 0 0 1-.306-.15l-2.41-3.096a.434.434 0 0 0-.61-.076l-.568.444a.434.434 0 0 0-.076.609l2.978 3.821a.819.819 0 0 0 .647.318c.25 0 .486-.112.647-.318l6.956-8.925a.434.434 0 0 0-.076-.609z"/>
+        </svg>
+      );
+    }
+    
+    if (status === 'read') {
+      // Две галочки синие
+      return (
+        <svg className="message-status read" viewBox="0 0 18 18" width="18" height="18">
+          <path fill="#58a6ff" d="M17.394 5.035l-.57-.444a.434.434 0 0 0-.609.076l-6.39 8.198a.38.38 0 0 1-.305.15.38.38 0 0 1-.306-.15l-2.41-3.096a.434.434 0 0 0-.61-.076l-.568.444a.434.434 0 0 0-.076.609l2.978 3.821a.819.819 0 0 0 .647.318c.25 0 .486-.112.647-.318l6.956-8.925a.434.434 0 0 0-.076-.609z"/>
+          <path fill="#58a6ff" d="M12.394 5.035l-.57-.444a.434.434 0 0 0-.609.076l-6.39 8.198a.38.38 0 0 1-.305.15.38.38 0 0 1-.306-.15l-2.41-3.096a.434.434 0 0 0-.61-.076l-.568.444a.434.434 0 0 0-.076.609l2.978 3.821a.819.819 0 0 0 .647.318c.25 0 .486-.112.647-.318l6.956-8.925a.434.434 0 0 0-.076-.609z"/>
+        </svg>
+      );
+    }
+    
+    return null;
+  };
+
+  // Синхронизация ref с state
+  useEffect(() => {
+    selectedChatRef.current = selectedChat;
+  }, [selectedChat]);
 
   useEffect(() => {
     const connectWebSocket = () => {
@@ -33,37 +75,130 @@ const Chat = ({ username, onLogout, authManager }) => {
         ws.send(JSON.stringify({ type: "register", username }));
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
 
           if (data.type === "new_message") {
             console.log("New message from:", data.from);
-            pollMessages();
+            
+            // Сразу отправляем подтверждение доставки
+            if (ws.readyState === 1) {
+              ws.send(JSON.stringify({
+                type: 'message_delivered',
+                sender: data.from,
+                messageId: data.messageId
+              }));
+            }
+            
+            await pollMessages();
+            
+            // Проверяем текущий выбранный чат через ref
+            const currentSelectedChat = selectedChatRef.current;
+            
+            // Если чат с отправителем открыт - сразу помечаем как прочитанное
+            if (currentSelectedChat?.username === data.from) {
+              // Небольшая задержка чтобы pollMessages успел обновить state
+              setTimeout(() => {
+                setMessages((prevMessages) => {
+                  const chatMessages = prevMessages[data.from] || [];
+                  const unreadMessageIds = chatMessages
+                    .filter(msg => !msg.isOutgoing && msg.messageId)
+                    .map(msg => msg.messageId);
+                  
+                  if (unreadMessageIds.length > 0 && ws.readyState === 1) {
+                    console.log("Auto-marking as read:", unreadMessageIds);
+                    
+                    ws.send(JSON.stringify({
+                      type: 'message_read',
+                      sender: data.from,
+                      messageIds: unreadMessageIds
+                    }));
+                    
+                    // Сбрасываем счётчик
+                    if (authManager.storage) {
+                      authManager.storage.resetUnreadCount(data.from);
+                      loadUnreadCounts();
+                    }
+                    
+                    // Помечаем сообщения как прочитанные в UI
+                    return {
+                      ...prevMessages,
+                      [data.from]: chatMessages.map(msg => ({
+                        ...msg,
+                        status: msg.isOutgoing ? msg.status : 'read'
+                      }))
+                    };
+                  }
+                  
+                  return prevMessages;
+                });
+              }, 200);
+            }
+            
+          } else if (data.type === "message_delivered") {
+            console.log("Message delivered:", data.messageId, "by", data.deliveredBy);
+            
+            // Обновляем UI
+            setMessages((prev) => {
+              const updated = { ...prev };
+              Object.keys(updated).forEach(contact => {
+                updated[contact] = updated[contact].map(msg => {
+                  if (msg.messageId === data.messageId && msg.isOutgoing) {
+                    console.log("✓✓ Updating message status to delivered:", msg.messageId);
+                    return { ...msg, status: 'delivered' };
+                  }
+                  return msg;
+                });
+              });
+              return updated;
+            });
+            
+            // Обновляем в storage
+            if (authManager.storage && data.deliveredBy) {
+              authManager.storage.updateMessageStatus(data.deliveredBy, data.messageId, 'delivered');
+            }
+            
+          } else if (data.type === "message_read") {
+            console.log("Messages read:", data.messageIds, "by", data.readBy);
+            
+            // Обновляем UI
+            setMessages((prev) => {
+              const updated = { ...prev };
+              Object.keys(updated).forEach(contact => {
+                updated[contact] = updated[contact].map(msg => {
+                  if (data.messageIds && data.messageIds.includes(msg.messageId) && msg.isOutgoing) {
+                    console.log("✓✓ BLUE - Updating message status to read:", msg.messageId);
+                    return { ...msg, status: 'read' };
+                  }
+                  return msg;
+                });
+              });
+              return updated;
+            });
+            
+            // Обновляем в storage
+            if (authManager.storage && data.readBy) {
+              data.messageIds?.forEach(msgId => {
+                authManager.storage.updateMessageStatus(data.readBy, msgId, 'read');
+              });
+            }
+            
           } else if (data.type === "profile_updated") {
             console.log("Profile updated:", data.username);
             invalidateProfileCache(data.username);
             loadProfileAvatarsBatch([data.username]);
+            
           } else if (data.type === "blocked") {
             console.log("Blocked by:", data.by);
-
-            // // Если открыт чат с тем, кто заблокировал - закрыть
-            // if (selectedChat?.username === data.by) {
-            //   setSelectedChat(null);
-            // }
-
             checkBlockStatus(data.by);
+            
           } else if (data.type === "unblocked") {
             console.log("Unblocked by:", data.by);
             checkBlockStatus(data.by);
+            
           } else if (data.type === "block_confirmed") {
             console.log("Block confirmed for:", data.username);
-
-            // // Закрываем чат у блокирующего тоже
-            // if (selectedChat?.username === data.username) {
-            //   setSelectedChat(null);
-            // }
-
             checkBlockStatus(data.username);
           }
         } catch (error) {
@@ -90,7 +225,7 @@ const Chat = ({ username, onLogout, authManager }) => {
         wsRef.current.close();
       }
     };
-  }, [username, selectedChat]);
+  }, [username]);
 
   useEffect(() => {
     loadMyProfile();
@@ -111,6 +246,21 @@ const Chat = ({ username, onLogout, authManager }) => {
       checkBlockStatus(selectedChat.username);
     }
   }, [selectedChat]);
+
+  useEffect(() => {
+    loadUnreadCounts();
+  }, [authManager.storage]);
+
+  const loadUnreadCounts = async () => {
+    if (!authManager.storage) return;
+    
+    try {
+      const counts = await authManager.storage.getAllUnreadCounts();
+      setUnreadCounts(counts);
+    } catch (error) {
+      console.error('Failed to load unread counts:', error);
+    }
+  };
 
   const loadMyProfile = async () => {
     try {
@@ -212,7 +362,6 @@ const Chat = ({ username, onLogout, authManager }) => {
     if (!window.confirm(`Очистить историю с ${contactUsername}?`)) return;
 
     try {
-      // Очищаем сообщения локально
       setMessages((prev) => ({
         ...prev,
         [contactUsername]: [],
@@ -238,15 +387,15 @@ const Chat = ({ username, onLogout, authManager }) => {
       return;
 
     try {
-      // Помечаем контакт как удалённый
       if (authManager.storage) {
         await authManager.storage.markContactAsDeleted(contactUsername);
         await authManager.storage.clearChatHistory(contactUsername);
       }
 
-      // Убираем из UI
-      setContacts((prev) => prev.filter((c) => c.username !== contactUsername));
-
+      setContacts((prev) =>
+        prev.filter((c) => c.username !== contactUsername)
+      );
+      
       setMessages((prev) => {
         const updated = { ...prev };
         delete updated[contactUsername];
@@ -255,6 +404,7 @@ const Chat = ({ username, onLogout, authManager }) => {
 
       if (selectedChat?.username === contactUsername) {
         setSelectedChat(null);
+        selectedChatRef.current = null;
       }
 
       console.log(`Чат с ${contactUsername} удалён`);
@@ -274,10 +424,9 @@ const Chat = ({ username, onLogout, authManager }) => {
 
       if (response.ok) {
         setBlockedUsers((prev) => new Set(prev).add(contactUsername));
-
-        // НЕ закрываем чат, только обновляем статус
+        
         await checkBlockStatus(contactUsername);
-
+        
         console.log(`${contactUsername} заблокирован`);
       }
     } catch (error) {
@@ -300,9 +449,9 @@ const Chat = ({ username, onLogout, authManager }) => {
           updated.delete(contactUsername);
           return updated;
         });
-
+        
         await checkBlockStatus(contactUsername);
-
+        
         console.log(`${contactUsername} разблокирован`);
       }
     } catch (error) {
@@ -329,7 +478,16 @@ const Chat = ({ username, onLogout, authManager }) => {
             text: msg.text,
             timestamp: msg.timestamp,
             isOutgoing: false,
+            messageId: msg.messageId,
+            status: msg.status || 'delivered'
           });
+
+          // Увеличиваем счётчик непрочитанных, если чат не открыт
+          if (!selectedChatRef.current || selectedChatRef.current.username !== sender) {
+            if (authManager.storage) {
+              await authManager.storage.incrementUnreadCount(sender);
+            }
+          }
         }
 
         setMessages((prev) => {
@@ -346,7 +504,8 @@ const Chat = ({ username, onLogout, authManager }) => {
         setContacts((prev) => {
           const newContacts = [...prev];
           Object.keys(messagesByContact).forEach((sender) => {
-            if (!newContacts.find((c) => c.username === sender)) {
+            const existingContact = newContacts.find((c) => c.username === sender);
+            if (!existingContact) {
               newContacts.push({
                 id: Date.now() + Math.random(),
                 username: sender,
@@ -363,10 +522,70 @@ const Chat = ({ username, onLogout, authManager }) => {
           });
           return newContacts;
         });
+
+        // Загружаем счётчики непрочитанных
+        await loadUnreadCounts();
       }
     } catch (error) {
       console.error("Failed to fetch messages:", error);
     }
+  };
+
+  const handleSelectChat = async (contact) => {
+    setSelectedChat(contact);
+    selectedChatRef.current = contact;
+    
+    // Сбрасываем счётчик непрочитанных СРАЗУ
+    if (authManager.storage) {
+      await authManager.storage.resetUnreadCount(contact.username);
+      await loadUnreadCounts();
+    }
+    
+    // Загружаем историю
+    await loadChatHistory(contact.username);
+    
+    // Ждём загрузку истории и отправляем подтверждение прочтения
+    setTimeout(() => {
+      setMessages((prevMessages) => {
+        const chatMessages = prevMessages[contact.username] || [];
+        const unreadMessageIds = chatMessages
+          .filter(msg => !msg.isOutgoing && msg.messageId && msg.status !== 'read')
+          .map(msg => msg.messageId);
+        
+        if (unreadMessageIds.length > 0 && wsRef.current?.readyState === 1) {
+          console.log("Sending read receipt for:", unreadMessageIds);
+          
+          // Отправляем подтверждение прочтения
+          wsRef.current.send(JSON.stringify({
+            type: 'message_read',
+            sender: contact.username,
+            messageIds: unreadMessageIds
+          }));
+          
+          // Помечаем в storage как прочитанные
+          if (authManager.storage) {
+            authManager.storage.updateMultipleMessageStatuses(
+              contact.username,
+              unreadMessageIds,
+              'read'
+            );
+          }
+          
+          // Обновляем UI - помечаем входящие как прочитанные
+          return {
+            ...prevMessages,
+            [contact.username]: chatMessages.map(msg => {
+              if (!msg.isOutgoing && unreadMessageIds.includes(msg.messageId)) {
+                return { ...msg, status: 'read' };
+              }
+              return msg;
+            })
+          };
+        }
+        
+        return prevMessages;
+      });
+    }, 300);
   };
 
   const Avatar = ({ username, size = 50 }) => {
@@ -455,6 +674,7 @@ const Chat = ({ username, onLogout, authManager }) => {
     const handleEsc = (e) => {
       if (e.key === "Escape" && selectedChat) {
         setSelectedChat(null);
+        selectedChatRef.current = null;
       }
     };
     window.addEventListener("keydown", handleEsc);
@@ -500,6 +720,8 @@ const Chat = ({ username, onLogout, authManager }) => {
           text: text,
           timestamp: msg.timestamp,
           isOutgoing: msg.isOutgoing,
+          messageId: msg.messageId,
+          status: msg.status || 'sent'
         };
       });
 
@@ -531,9 +753,9 @@ const Chat = ({ username, onLogout, authManager }) => {
         };
 
         setContacts((prev) => [...prev, newContact]);
-
+        
         await loadProfileAvatarsBatch([searchUsername]);
-
+        
         console.log(`Пользователь ${searchUsername} найден и добавлен`);
       }
     } catch (error) {
@@ -552,36 +774,66 @@ const Chat = ({ username, onLogout, authManager }) => {
       return;
     }
 
+    const tempId = `temp_${Date.now()}`;
+    const optimisticMessage = {
+      text: messageText,
+      timestamp: Date.now(),
+      isOutgoing: true,
+      messageId: tempId,
+      status: 'sent'
+    };
+
+    // Оптимистичное обновление UI
+    setMessages((prev) => ({
+      ...prev,
+      [selectedChat.username]: [
+        ...(prev[selectedChat.username] || []),
+        optimisticMessage,
+      ],
+    }));
+
+    const messageTextToSend = messageText;
+    setMessageText("");
+
     setLoading(true);
     try {
-      await authManager.sendMessage(selectedChat.username, messageText);
+      const result = await authManager.sendMessage(selectedChat.username, messageTextToSend);
 
-      const newMessage = {
-        text: messageText,
-        timestamp: Date.now(),
-        isOutgoing: true,
-      };
-
+      // Заменяем временный ID на реальный
       setMessages((prev) => ({
         ...prev,
-        [selectedChat.username]: [
-          ...(prev[selectedChat.username] || []),
-          newMessage,
-        ],
+        [selectedChat.username]: prev[selectedChat.username].map(msg => {
+          if (msg.messageId === tempId) {
+            return {
+              ...msg,
+              messageId: result.messageId,
+              status: result.deliveryStatus || 'delivered'
+            };
+          }
+          return msg;
+        })
       }));
 
       setContacts((prev) =>
         prev.map((c) =>
           c.username === selectedChat.username
-            ? { ...c, lastMessage: messageText, timestamp: "Сейчас" }
+            ? { ...c, lastMessage: messageTextToSend, timestamp: "Сейчас" }
             : c
         )
       );
 
-      setMessageText("");
       console.log("Message sent successfully");
     } catch (error) {
       console.error("Failed to send message:", error);
+      
+      // Откатываем оптимистичное обновление
+      setMessages((prev) => ({
+        ...prev,
+        [selectedChat.username]: prev[selectedChat.username].filter(msg => msg.messageId !== tempId)
+      }));
+      
+      setMessageText(messageTextToSend);
+      
       if (error.message.includes("blocked")) {
         alert("Невозможно отправить сообщение - пользователь заблокирован");
       } else {
@@ -700,7 +952,10 @@ const Chat = ({ username, onLogout, authManager }) => {
 
       <div className="chat-layout">
         <div className="burger-strip">
-          <button className="burger-btn" onClick={() => setMenuOpen(!menuOpen)}>
+          <button
+            className="burger-btn"
+            onClick={() => setMenuOpen(!menuOpen)}
+          >
             <span></span>
             <span></span>
             <span></span>
@@ -799,7 +1054,7 @@ const Chat = ({ username, onLogout, authManager }) => {
                 <div
                   key={contact.id}
                   className={`contact-item ${selectedChat?.id === contact.id ? "active" : ""}`}
-                  onClick={() => setSelectedChat(contact)}
+                  onClick={() => handleSelectChat(contact)}
                   onContextMenu={(e) => handleContextMenu(e, contact)}
                 >
                   <Avatar username={contact.username} size={50} />
@@ -810,8 +1065,10 @@ const Chat = ({ username, onLogout, authManager }) => {
                     </div>
                     <div className="contact-message">
                       <p>{contact.lastMessage}</p>
-                      {contact.unread > 0 && (
-                        <span className="unread-badge">{contact.unread}</span>
+                      {unreadCounts[contact.username] > 0 && (
+                        <span className="unread-badge">
+                          {unreadCounts[contact.username]}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -853,7 +1110,10 @@ const Chat = ({ username, onLogout, authManager }) => {
                   </button>
                   <button
                     className="icon-btn"
-                    onClick={() => setSelectedChat(null)}
+                    onClick={() => {
+                      setSelectedChat(null);
+                      selectedChatRef.current = null;
+                    }}
                     title="Закрыть чат (ESC)"
                   >
                     <svg viewBox="0 0 24 24" width="24" height="24">
@@ -888,12 +1148,15 @@ const Chat = ({ username, onLogout, authManager }) => {
                       >
                         <div className="message-bubble">
                           <p>{msg.text}</p>
-                          <span className="message-time">
-                            {new Date(msg.timestamp).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
+                          <div className="message-meta">
+                            <span className="message-time">
+                              {new Date(msg.timestamp).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                            {msg.isOutgoing && <MessageStatusIcon status={msg.status || 'sent'} />}
+                          </div>
                         </div>
                       </div>
                     ))}
