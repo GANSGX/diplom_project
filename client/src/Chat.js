@@ -46,24 +46,24 @@ const Chat = ({ username, onLogout, authManager }) => {
             loadProfileAvatarsBatch([data.username]);
           } else if (data.type === "blocked") {
             console.log("Blocked by:", data.by);
-            
-            // Если открыт чат с тем, кто заблокировал - закрыть
-            if (selectedChat?.username === data.by) {
-              setSelectedChat(null);
-            }
-            
+
+            // // Если открыт чат с тем, кто заблокировал - закрыть
+            // if (selectedChat?.username === data.by) {
+            //   setSelectedChat(null);
+            // }
+
             checkBlockStatus(data.by);
           } else if (data.type === "unblocked") {
             console.log("Unblocked by:", data.by);
             checkBlockStatus(data.by);
           } else if (data.type === "block_confirmed") {
             console.log("Block confirmed for:", data.username);
-            
-            // Закрываем чат у блокирующего тоже
-            if (selectedChat?.username === data.username) {
-              setSelectedChat(null);
-            }
-            
+
+            // // Закрываем чат у блокирующего тоже
+            // if (selectedChat?.username === data.username) {
+            //   setSelectedChat(null);
+            // }
+
             checkBlockStatus(data.username);
           }
         } catch (error) {
@@ -245,10 +245,8 @@ const Chat = ({ username, onLogout, authManager }) => {
       }
 
       // Убираем из UI
-      setContacts((prev) =>
-        prev.filter((c) => c.username !== contactUsername)
-      );
-      
+      setContacts((prev) => prev.filter((c) => c.username !== contactUsername));
+
       setMessages((prev) => {
         const updated = { ...prev };
         delete updated[contactUsername];
@@ -276,15 +274,10 @@ const Chat = ({ username, onLogout, authManager }) => {
 
       if (response.ok) {
         setBlockedUsers((prev) => new Set(prev).add(contactUsername));
-        
-        // Закрываем чат если он открыт
-        if (selectedChat?.username === contactUsername) {
-          setSelectedChat(null);
-        }
-        
-        // Обновляем статус блокировки
+
+        // НЕ закрываем чат, только обновляем статус
         await checkBlockStatus(contactUsername);
-        
+
         console.log(`${contactUsername} заблокирован`);
       }
     } catch (error) {
@@ -307,9 +300,9 @@ const Chat = ({ username, onLogout, authManager }) => {
           updated.delete(contactUsername);
           return updated;
         });
-        
+
         await checkBlockStatus(contactUsername);
-        
+
         console.log(`${contactUsername} разблокирован`);
       }
     } catch (error) {
@@ -538,9 +531,9 @@ const Chat = ({ username, onLogout, authManager }) => {
         };
 
         setContacts((prev) => [...prev, newContact]);
-        
+
         await loadProfileAvatarsBatch([searchUsername]);
-        
+
         console.log(`Пользователь ${searchUsername} найден и добавлен`);
       }
     } catch (error) {
@@ -707,10 +700,7 @@ const Chat = ({ username, onLogout, authManager }) => {
 
       <div className="chat-layout">
         <div className="burger-strip">
-          <button
-            className="burger-btn"
-            onClick={() => setMenuOpen(!menuOpen)}
-          >
+          <button className="burger-btn" onClick={() => setMenuOpen(!menuOpen)}>
             <span></span>
             <span></span>
             <span></span>
