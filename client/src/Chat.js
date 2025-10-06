@@ -46,14 +46,25 @@ const Chat = ({ username, onLogout, authManager }) => {
             loadProfileAvatarsBatch([data.username]);
           } else if (data.type === "blocked") {
             console.log("Blocked by:", data.by);
+            
+            // Если открыт чат с тем, кто заблокировал - закрыть
             if (selectedChat?.username === data.by) {
-              checkBlockStatus(data.by);
+              setSelectedChat(null);
             }
+            
+            checkBlockStatus(data.by);
           } else if (data.type === "unblocked") {
             console.log("Unblocked by:", data.by);
-            if (selectedChat?.username === data.by) {
-              checkBlockStatus(data.by);
+            checkBlockStatus(data.by);
+          } else if (data.type === "block_confirmed") {
+            console.log("Block confirmed for:", data.username);
+            
+            // Закрываем чат у блокирующего тоже
+            if (selectedChat?.username === data.username) {
+              setSelectedChat(null);
             }
+            
+            checkBlockStatus(data.username);
           }
         } catch (error) {
           console.error("WebSocket message error:", error);
@@ -201,6 +212,7 @@ const Chat = ({ username, onLogout, authManager }) => {
     if (!window.confirm(`Очистить историю с ${contactUsername}?`)) return;
 
     try {
+      // Очищаем сообщения локально
       setMessages((prev) => ({
         ...prev,
         [contactUsername]: [],
@@ -213,6 +225,7 @@ const Chat = ({ username, onLogout, authManager }) => {
       console.log(`История с ${contactUsername} очищена локально`);
     } catch (error) {
       console.error("Failed to clear chat:", error);
+      alert("Не удалось очистить историю");
     }
   };
 
@@ -225,26 +238,22 @@ const Chat = ({ username, onLogout, authManager }) => {
       return;
 
     try {
-      await fetch(
-        `${authManager.serverUrl}/chat/${username}/${contactUsername}`,
-        {
-          method: "DELETE",
-        }
-      );
+      // Помечаем контакт как удалённый
+      if (authManager.storage) {
+        await authManager.storage.markContactAsDeleted(contactUsername);
+        await authManager.storage.clearChatHistory(contactUsername);
+      }
 
+      // Убираем из UI
       setContacts((prev) =>
         prev.filter((c) => c.username !== contactUsername)
       );
+      
       setMessages((prev) => {
         const updated = { ...prev };
         delete updated[contactUsername];
         return updated;
       });
-
-      if (authManager.storage) {
-        await authManager.storage.deleteContact(contactUsername);
-        await authManager.storage.clearChatHistory(contactUsername);
-      }
 
       if (selectedChat?.username === contactUsername) {
         setSelectedChat(null);
@@ -253,6 +262,7 @@ const Chat = ({ username, onLogout, authManager }) => {
       console.log(`Чат с ${contactUsername} удалён`);
     } catch (error) {
       console.error("Failed to delete chat:", error);
+      alert("Не удалось удалить чат");
     }
   };
 
@@ -266,13 +276,20 @@ const Chat = ({ username, onLogout, authManager }) => {
 
       if (response.ok) {
         setBlockedUsers((prev) => new Set(prev).add(contactUsername));
+        
+        // Закрываем чат если он открыт
         if (selectedChat?.username === contactUsername) {
-          await checkBlockStatus(contactUsername);
+          setSelectedChat(null);
         }
+        
+        // Обновляем статус блокировки
+        await checkBlockStatus(contactUsername);
+        
         console.log(`${contactUsername} заблокирован`);
       }
     } catch (error) {
       console.error("Failed to block user:", error);
+      alert("Не удалось заблокировать пользователя");
     }
   };
 
@@ -290,13 +307,14 @@ const Chat = ({ username, onLogout, authManager }) => {
           updated.delete(contactUsername);
           return updated;
         });
-        if (selectedChat?.username === contactUsername) {
-          await checkBlockStatus(contactUsername);
-        }
+        
+        await checkBlockStatus(contactUsername);
+        
         console.log(`${contactUsername} разблокирован`);
       }
     } catch (error) {
       console.error("Failed to unblock user:", error);
+      alert("Не удалось разблокировать пользователя");
     }
   };
 
@@ -404,7 +422,7 @@ const Chat = ({ username, onLogout, authManager }) => {
         const formattedContacts = storedContacts.map((contact, index) => ({
           id: Date.now() + index,
           username: contact.username,
-          lastMessage: "Сохраненный контакт",
+          lastMessage: "Сохранённый контакт",
           timestamp: new Date(contact.addedAt).toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
@@ -826,7 +844,9 @@ const Chat = ({ username, onLogout, authManager }) => {
                   <Avatar username={selectedChat.username} size={45} />
                   <div>
                     <h3>{selectedChat.username}</h3>
-                    <p className="chat-status">был(а) недавно</p>
+                    <p className="chat-status">
+                      {isBlocked ? whoBlockedWhom : "был(а) недавно"}
+                    </p>
                   </div>
                 </div>
                 <div
