@@ -411,9 +411,16 @@ app.post('/block', async (req, res) => {
     await Block.create({ blocker, blocked });
     console.log(`✅ ${blocker} blocked ${blocked}`);
     
+    // Уведомляем заблокированного
     broadcastToUser(blocked, {
       type: 'blocked',
       by: blocker
+    });
+    
+    // Уведомляем блокирующего (для закрытия чата)
+    broadcastToUser(blocker, {
+      type: 'block_confirmed',
+      username: blocked
     });
     
     res.json({ status: 'ok' });

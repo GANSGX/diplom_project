@@ -171,11 +171,12 @@ class ParanoidStorage {
     });
   }
 
-  async storeContact(username, publicKeyBundle) {
+  async storeContact(username, publicKeyBundle, isDeleted = false) {
     const contactData = {
       username,
       publicKey: publicKeyBundle,
-      addedAt: Date.now()
+      addedAt: Date.now(),
+      isDeleted: isDeleted  // Флаг удаления
     };
 
     const encrypted = await this._encrypt(contactData);
@@ -235,7 +236,11 @@ class ParanoidStorage {
           
           for (const encryptedContact of request.result) {
             const decrypted = await this._decrypt(encryptedContact.encrypted);
-            contacts.push(decrypted);
+            
+            // Пропускаем удалённые контакты
+            if (!decrypted.isDeleted) {
+              contacts.push(decrypted);
+            }
           }
           
           console.log(`Загружено ${contacts.length} контактов из хранилища`);
@@ -249,6 +254,20 @@ class ParanoidStorage {
     });
   }
 
+  // Пометить контакт как удалённый (soft delete)
+  async markContactAsDeleted(username) {
+    const contact = await this.getContact(username);
+    if (!contact) {
+      console.log(`Контакт ${username} не найден для удаления`);
+      return false;
+    }
+    
+    await this.storeContact(username, contact.publicKey, true);
+    console.log(`Контакт ${username} помечен как удалённый`);
+    return true;
+  }
+
+  // Полное удаление контакта из БД (не используется пока)
   async deleteContact(username) {
     const transaction = this.db.transaction(['contacts'], 'readwrite');
     const store = transaction.objectStore('contacts');
